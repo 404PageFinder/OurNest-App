@@ -1,14 +1,35 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 
 export default function App() {
   const [mobile, setMobile] = useState("");
   const [requestId, setRequestId] = useState(null);
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState("mobile");
+  const [step, setStep] = useState("mobile"); // "mobile" or "otp"
   const [error, setError] = useState("");
+  const [backendStatus, setBackendStatus] = useState("checking...");
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
+
+  // Call /health when app loads
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const res = await fetch("http://localhost:8000/health");
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (data.status === "ok") {
+          setBackendStatus("online");
+        } else {
+          setBackendStatus("offline");
+        }
+      } catch {
+        setBackendStatus("offline");
+      }
+    };
+
+    checkBackend();
+  }, []);
 
   const sendOtp = async () => {
     if (!isValidMobile) {
@@ -17,44 +38,64 @@ export default function App() {
     }
     setError("");
 
-    const res = await fetch("http://localhost:8000/auth/send-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mobile }),
-    });
+    try {
+      const res = await fetch("http://localhost:8000/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mobile }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.detail);
-      return;
+      if (!res.ok) {
+        setError(data.detail || "Failed to send OTP");
+        return;
+      }
+
+      setRequestId(data.request_id);
+      setStep("otp");
+    } catch (e) {
+      setError("Could not reach server. Is backend running?");
     }
-
-    setRequestId(data.request_id);
-    setStep("otp");
   };
 
   const verifyOtp = async () => {
-    const res = await fetch("http://localhost:8000/auth/verify-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request_id: requestId, mobile, otp }),
-    });
+    setError("");
+    try {
+      const res = await fetch("http://localhost:8000/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, mobile, otp }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      setError(data.detail);
-      return;
+      if (!res.ok) {
+        setError(data.detail || "OTP verification failed");
+        return;
+      }
+
+      alert("OTP Verified! (next: onboarding flow)");
+    } catch (e) {
+      setError("Could not reach server. Is backend running?");
     }
-
-    alert("OTP Verified!");
   };
 
   return (
     <div className="screen">
       <div className="card">
         <h2>Get started with OurNest</h2>
+
+        <p className="backend-status">
+          Backend:{" "}
+          <span
+            className={
+              backendStatus === "online" ? "status-ok" : "status-bad"
+            }
+          >
+            {backendStatus}
+          </span>
+        </p>
 
         {step === "mobile" && (
           <>

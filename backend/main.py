@@ -116,3 +116,7 @@ def verify_otp(data: VerifyOtpRequest):
         raise HTTPException(400, "Incorrect OTP. Try again.")
 
     return VerifyOtpResponse(success=True, message="OTP Verified!")
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "ournest-backend"}

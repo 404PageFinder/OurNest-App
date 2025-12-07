@@ -43,3 +43,19 @@ button:disabled {
   color: red;
   margin-top: 12px;
 }
+
+.backend-status {
+  font-size: 12px;
+  margin-bottom: 8px;
+  color: #555;
+}
+
+.status-ok {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.status-bad {
+  color: #dc2626;
+  font-weight: 600;
+}
