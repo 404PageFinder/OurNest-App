@@ -59,3 +59,34 @@ button:disabled {
   color: #dc2626;
   font-weight: 600;
 }
+
+.welcome-text {
+  font-size: 14px;
+  margin: 8px 0 12px;
+  color: #333;
+}
+
+.info {
+  color: #2563eb;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.apt-list {
+  text-align: left;
+  margin-top: 16px;
+}
+
+.apt-list h4 {
+  margin-bottom: 6px;
+}
+
+.apt-list ul {
+  padding-left: 18px;
+  margin: 0;
+}
+
+.apt-list li {
+  font-size: 13px;
+  margin-bottom: 4px;
+}

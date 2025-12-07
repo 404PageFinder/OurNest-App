@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
-from typing import Dict
+from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,13 +27,16 @@ class OtpRecord(BaseModel):
 
 otp_store: Dict[str, OtpRecord] = {}
 
-SECRET_KEY = "TEMP_SECRET"  # TODO: move to env variable in future
+SECRET_KEY = "TEMP_SECRET"  # TODO: move to env variable later
 
 OTP_TTL_MINUTES = 5
 MAX_ATTEMPTS = 5
 
 
 # ---------- Pydantic models for API ----------
+
+MOBILE_REGEX = r"^[6-9]\d{9}$"
+
 
 class SendOtpRequest(BaseModel):
     mobile: str
@@ -42,7 +45,7 @@ class SendOtpRequest(BaseModel):
     @classmethod
     def validate_mobile(cls, v):
         import re
-        if not re.fullmatch(r"^[6-9]\d{9}$", v):
+        if not re.fullmatch(MOBILE_REGEX, v):
             raise ValueError("Invalid Indian mobile number.")
         return v
 
@@ -57,6 +60,14 @@ class VerifyOtpRequest(BaseModel):
     mobile: str
     otp: str
 
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
+
     @field_validator("otp")
     @classmethod
     def validate_otp(cls, v):
@@ -68,6 +79,60 @@ class VerifyOtpRequest(BaseModel):
 class VerifyOtpResponse(BaseModel):
     success: bool
     message: str
+
+
+# ----- Apartment Pydantic models -----
+
+class ApartmentCreateRequest(BaseModel):
+    mobile: str  # who is creating this apartment
+    name: str
+    city: str
+    total_units: int
+
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Apartment name must be at least 2 characters.")
+        return v
+
+    @field_validator("city")
+    @classmethod
+    def validate_city(cls, v):
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("City name must be at least 2 characters.")
+        return v
+
+    @field_validator("total_units")
+    @classmethod
+    def validate_units(cls, v):
+        if v <= 0:
+            raise ValueError("Total units must be greater than zero.")
+        return v
+
+
+class ApartmentResponse(BaseModel):
+    id: int
+    name: str
+    city: str
+    total_units: int
+
+    class Config:
+        from_attributes = True
+
+
+class ApartmentListResponse(BaseModel):
+    apartments: List[ApartmentResponse]
 
 
 # ---------- Helper functions ----------
@@ -172,11 +237,10 @@ def verify_otp(data: VerifyOtpRequest, db: Session = Depends(get_db)):
 
     record.status = "verified"
 
-    # ---- NEW: create or update User in DB ----
+    # ---- Create or update User in DB ----
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
 
     if user is None:
-        # New user — first time logging in
         user = models.User(
             mobile=data.mobile,
             is_active=True,
@@ -184,7 +248,6 @@ def verify_otp(data: VerifyOtpRequest, db: Session = Depends(get_db)):
         )
         db.add(user)
     else:
-        # Existing user — update last_login_at and ensure active
         user.is_active = True
         user.last_login_at = datetime.utcnow()
 
@@ -194,3 +257,46 @@ def verify_otp(data: VerifyOtpRequest, db: Session = Depends(get_db)):
         success=True,
         message="OTP verified and user logged in."
     )
+
+
+# ---------- Apartment endpoints ----------
+
+@app.post("/apartments", response_model=ApartmentResponse)
+def create_apartment(data: ApartmentCreateRequest, db: Session = Depends(get_db)):
+    """
+    Create a new apartment for the given mobile (user).
+    """
+    # Find user by mobile
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    apartment = models.Apartment(
+        name=data.name.strip(),
+        city=data.city.strip(),
+        total_units=data.total_units,
+        created_by_user_id=user.id,
+    )
+    db.add(apartment)
+    db.commit()
+    db.refresh(apartment)
+
+    return apartment
+
+
+@app.get("/apartments", response_model=ApartmentListResponse)
+def list_apartments(mobile: str, db: Session = Depends(get_db)):
+    """
+    List all apartments created by this mobile number.
+    """
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    apartments = (
+        db.query(models.Apartment)
+        .filter(models.Apartment.created_by_user_id == user.id)
+        .all()
+    )
+
+    return ApartmentListResponse(apartments=apartments)
