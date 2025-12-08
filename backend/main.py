@@ -32,11 +32,10 @@ SECRET_KEY = "TEMP_SECRET"  # TODO: move to env variable later
 OTP_TTL_MINUTES = 5
 MAX_ATTEMPTS = 5
 
-
-# ---------- Pydantic models for API ----------
-
 MOBILE_REGEX = r"^[6-9]\d{9}$"
 
+
+# ---------- Pydantic models for Auth ----------
 
 class SendOtpRequest(BaseModel):
     mobile: str
@@ -81,7 +80,7 @@ class VerifyOtpResponse(BaseModel):
     message: str
 
 
-# ----- Apartment Pydantic models -----
+# ---------- Apartment Pydantic models ----------
 
 class ApartmentCreateRequest(BaseModel):
     mobile: str  # who is creating this apartment
@@ -135,6 +134,65 @@ class ApartmentListResponse(BaseModel):
     apartments: List[ApartmentResponse]
 
 
+# ---------- Unit Pydantic models ----------
+
+VALID_BHK_TYPES = {"1BHK", "2BHK", "3BHK", "4BHK"}
+VALID_UNIT_STATUS = {"vacant", "occupied"}
+
+
+class UnitCreateRequest(BaseModel):
+    mobile: str  # who is creating this unit (must own the apartment)
+    unit_number: str
+    bhk_type: str
+    status: str
+
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
+
+    @field_validator("unit_number")
+    @classmethod
+    def validate_unit_number(cls, v):
+        v = v.strip()
+        if len(v) == 0:
+            raise ValueError("Unit number cannot be empty.")
+        return v
+
+    @field_validator("bhk_type")
+    @classmethod
+    def validate_bhk_type(cls, v):
+        v = v.strip().upper()
+        if v not in VALID_BHK_TYPES:
+            raise ValueError(f"bhk_type must be one of: {', '.join(sorted(VALID_BHK_TYPES))}")
+        return v
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        v = v.strip().lower()
+        if v not in VALID_UNIT_STATUS:
+            raise ValueError("status must be 'vacant' or 'occupied'.")
+        return v
+
+
+class UnitResponse(BaseModel):
+    id: int
+    unit_number: str
+    bhk_type: str
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
+class UnitListResponse(BaseModel):
+    units: List[UnitResponse]
+
+
 # ---------- Helper functions ----------
 
 def generate_otp() -> str:
@@ -168,9 +226,9 @@ app.add_middleware(
 )
 
 
-# Create DB tables on startup
 @app.on_event("startup")
 def on_startup():
+    # Create all tables
     Base.metadata.create_all(bind=engine)
 
 
@@ -266,7 +324,6 @@ def create_apartment(data: ApartmentCreateRequest, db: Session = Depends(get_db)
     """
     Create a new apartment for the given mobile (user).
     """
-    # Find user by mobile
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
@@ -300,3 +357,99 @@ def list_apartments(mobile: str, db: Session = Depends(get_db)):
     )
 
     return ApartmentListResponse(apartments=apartments)
+
+
+# ---------- Unit endpoints ----------
+
+@app.post("/apartments/{apartment_id}/units", response_model=UnitResponse)
+def create_unit(
+    apartment_id: int,
+    data: UnitCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Create a unit/flat under a given apartment, only if the apartment belongs
+    to the user identified by mobile.
+    """
+    # Find user
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Ensure apartment belongs to this user
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.id == apartment_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if apartment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Apartment not found for this user.",
+        )
+
+    # Optional: avoid duplicate unit numbers within same apartment
+    existing = (
+        db.query(models.Unit)
+        .filter(
+            models.Unit.apartment_id == apartment_id,
+            models.Unit.unit_number == data.unit_number.strip(),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="A unit with this number already exists in this apartment.",
+        )
+
+    unit = models.Unit(
+        apartment_id=apartment_id,
+        unit_number=data.unit_number.strip(),
+        bhk_type=data.bhk_type,   # already validated + upper-cased
+        status=data.status,       # already validated + lower-cased
+    )
+    db.add(unit)
+    db.commit()
+    db.refresh(unit)
+
+    return unit
+
+
+@app.get("/apartments/{apartment_id}/units", response_model=UnitListResponse)
+def list_units(
+    apartment_id: int,
+    mobile: str,
+    db: Session = Depends(get_db),
+):
+    """
+    List all units under an apartment for the given mobile.
+    """
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.id == apartment_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if apartment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Apartment not found for this user.",
+        )
+
+    units = (
+        db.query(models.Unit)
+        .filter(models.Unit.apartment_id == apartment_id)
+        .all()
+    )
+
+    return UnitListResponse(units=units)
