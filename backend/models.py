@@ -1,4 +1,12 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, func, ForeignKey
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Boolean,
+    func,
+    ForeignKey,
+)
 from db import Base
 
 
@@ -34,10 +42,10 @@ class Unit(Base):
     id = Column(Integer, primary_key=True, index=True)
     apartment_id = Column(Integer, ForeignKey("apartments.id"), nullable=False)
 
-    # e.g. "101", "A-203"
-    unit_number = Column(String(50), nullable=False)
+    # Example: "101", "A-203", "G1"
+    name = Column(String(50), nullable=False)
 
-    # e.g. "2BHK", "3BHK"
+    # Example: "2BHK", "3BHK"
     bhk_type = Column(String(10), nullable=False)
 
     # "vacant" or "occupied"

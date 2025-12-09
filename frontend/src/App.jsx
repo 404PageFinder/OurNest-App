@@ -13,23 +13,23 @@ export default function App() {
   const [aptName, setAptName] = useState("");
   const [aptCity, setAptCity] = useState("");
   const [aptUnits, setAptUnits] = useState("");
+  const [aptMessage, setAptMessage] = useState("");
   const [createdApartments, setCreatedApartments] = useState([]);
 
-  // Selected apartment for unit management
+  // Selected apartment for Units
   const [selectedApartmentId, setSelectedApartmentId] = useState(null);
   const [selectedApartmentName, setSelectedApartmentName] = useState("");
 
-  // Units form + list
+  // Units
   const [units, setUnits] = useState([]);
-  const [unitNumber, setUnitNumber] = useState("");
-  const [bhkType, setBhkType] = useState("2BHK");
+  const [unitName, setUnitName] = useState("");
+  const [unitBhk, setUnitBhk] = useState("2BHK");
   const [unitStatus, setUnitStatus] = useState("vacant");
-
-  const [infoMessage, setInfoMessage] = useState("");
+  const [unitMessage, setUnitMessage] = useState("");
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
 
-  // Check backend status
+  // Check backend on load
   useEffect(() => {
     const checkBackend = async () => {
       try {
@@ -55,7 +55,6 @@ export default function App() {
       return;
     }
     setError("");
-    setInfoMessage("");
 
     try {
       const res = await fetch("http://localhost:8000/auth/send-otp", {
@@ -73,15 +72,13 @@ export default function App() {
 
       setRequestId(data.request_id);
       setStep("otp");
-    } catch (e) {
+    } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
 
   const verifyOtp = async () => {
     setError("");
-    setInfoMessage("");
-
     try {
       const res = await fetch("http://localhost:8000/auth/verify-otp", {
         method: "POST",
@@ -96,10 +93,11 @@ export default function App() {
         return;
       }
 
+      // Go to apartment onboarding
       setStep("apartment");
-      setInfoMessage("OTP verified! Let’s onboard your apartment.");
+      setAptMessage("OTP verified! Let’s onboard your apartment.");
       fetchApartments();
-    } catch (e) {
+    } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
@@ -122,7 +120,7 @@ export default function App() {
 
   const createApartment = async () => {
     setError("");
-    setInfoMessage("");
+    setAptMessage("");
 
     const totalUnitsNum = parseInt(aptUnits, 10);
 
@@ -145,25 +143,22 @@ export default function App() {
         return;
       }
 
-      setInfoMessage(`Apartment "${data.name}" created successfully!`);
+      setAptMessage(`Apartment "${data.name}" created successfully!`);
       setAptName("");
       setAptCity("");
       setAptUnits("");
       fetchApartments();
-    } catch (e) {
+    } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
 
-  const selectApartment = async (apt) => {
+  const handleSelectApartment = (apt) => {
     setSelectedApartmentId(apt.id);
-    setSelectedApartmentName(`${apt.name} (${apt.city})`);
-    setInfoMessage("");
-    setError("");
-    setUnitNumber("");
-    setBhkType("2BHK");
-    setUnitStatus("vacant");
-    await fetchUnits(apt.id);
+    setSelectedApartmentName(apt.name);
+    setUnitMessage("");
+    setUnits([]);
+    fetchUnits(apt.id);
   };
 
   const fetchUnits = async (apartmentId) => {
@@ -183,10 +178,12 @@ export default function App() {
   };
 
   const createUnit = async () => {
-    if (!selectedApartmentId) return;
-
+    if (!selectedApartmentId) {
+      setUnitMessage("Please select an apartment first.");
+      return;
+    }
     setError("");
-    setInfoMessage("");
+    setUnitMessage("");
 
     try {
       const res = await fetch(
@@ -196,8 +193,8 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mobile,
-            unit_number: unitNumber,
-            bhk_type: bhkType,
+            name: unitName,
+            bhk_type: unitBhk,
             status: unitStatus,
           }),
         }
@@ -210,14 +207,12 @@ export default function App() {
         return;
       }
 
-      setInfoMessage(
-        `Unit ${data.unit_number} (${data.bhk_type}, ${data.status}) added to ${selectedApartmentName}.`
-      );
-      setUnitNumber("");
-      setBhkType("2BHK");
+      setUnitMessage(`Unit "${data.name}" created successfully!`);
+      setUnitName("");
+      setUnitBhk("2BHK");
       setUnitStatus("vacant");
       fetchUnits(selectedApartmentId);
-    } catch (e) {
+    } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
@@ -238,7 +233,6 @@ export default function App() {
           </span>
         </p>
 
-        {/* STEP 1: Mobile */}
         {step === "mobile" && (
           <>
             <input
@@ -252,7 +246,6 @@ export default function App() {
           </>
         )}
 
-        {/* STEP 2: OTP */}
         {step === "otp" && (
           <>
             <p>OTP sent to +91 {mobile}</p>
@@ -267,83 +260,84 @@ export default function App() {
           </>
         )}
 
-        {/* STEP 3: Apartment + Units */}
         {step === "apartment" && (
           <>
             <p className="welcome-text">
-              Welcome, +91 {mobile}. Let’s onboard your apartment and units.
+              Welcome, +91 {mobile}. Onboard your apartment and units.
             </p>
 
             {/* Apartment creation */}
-            <input
-              placeholder="Apartment name"
-              value={aptName}
-              onChange={(e) => setAptName(e.target.value)}
-            />
-            <input
-              placeholder="City"
-              value={aptCity}
-              onChange={(e) => setAptCity(e.target.value)}
-            />
-            <input
-              placeholder="Total units (e.g., 40)"
-              type="number"
-              value={aptUnits}
-              onChange={(e) => setAptUnits(e.target.value)}
-            />
-            <button
-              onClick={createApartment}
-              disabled={!aptName || !aptCity || !aptUnits}
-            >
-              Create Apartment
-            </button>
+            <div className="section">
+              <h3 className="section-title">Create Apartment</h3>
+              <input
+                placeholder="Apartment name"
+                value={aptName}
+                onChange={(e) => setAptName(e.target.value)}
+              />
+              <input
+                placeholder="City"
+                value={aptCity}
+                onChange={(e) => setAptCity(e.target.value)}
+              />
+              <input
+                placeholder="Total units (e.g., 40)"
+                type="number"
+                value={aptUnits}
+                onChange={(e) => setAptUnits(e.target.value)}
+              />
+              <button
+                onClick={createApartment}
+                disabled={!aptName || !aptCity || !aptUnits}
+              >
+                Create Apartment
+              </button>
+            </div>
 
-            {/* Apartment list */}
+            {/* Apartment list & selection */}
             {createdApartments.length > 0 && (
-              <div className="apt-list">
-                <h4>Your apartments</h4>
-                <ul>
+              <div className="section">
+                <h3 className="section-title">Your apartments</h3>
+                <ul className="apt-list">
                   {createdApartments.map((apt) => (
-                    <li key={apt.id}>
-                      <button
-                        className={
-                          selectedApartmentId === apt.id
-                            ? "apt-button selected"
-                            : "apt-button"
-                        }
-                        onClick={() => selectApartment(apt)}
-                      >
-                        <strong>{apt.name}</strong> – {apt.city} (
-                        {apt.total_units} units)
-                      </button>
+                    <li
+                      key={apt.id}
+                      className={
+                        apt.id === selectedApartmentId
+                          ? "apt-item selected"
+                          : "apt-item"
+                      }
+                      onClick={() => handleSelectApartment(apt)}
+                    >
+                      <strong>{apt.name}</strong> – {apt.city} (
+                      {apt.total_units} units)
                     </li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* Units section for selected apartment */}
+            {/* Units for selected apartment */}
             {selectedApartmentId && (
-              <div className="unit-section">
-                <h4>Units in {selectedApartmentName}</h4>
+              <div className="section">
+                <h3 className="section-title">
+                  Units for: {selectedApartmentName}
+                </h3>
 
                 <div className="unit-form">
                   <input
                     placeholder="Unit number (e.g., 101)"
-                    value={unitNumber}
-                    onChange={(e) => setUnitNumber(e.target.value)}
+                    value={unitName}
+                    onChange={(e) => setUnitName(e.target.value)}
                   />
-
                   <select
-                    value={bhkType}
-                    onChange={(e) => setBhkType(e.target.value)}
+                    value={unitBhk}
+                    onChange={(e) => setUnitBhk(e.target.value)}
                   >
                     <option value="1BHK">1BHK</option>
                     <option value="2BHK">2BHK</option>
                     <option value="3BHK">3BHK</option>
                     <option value="4BHK">4BHK</option>
                   </select>
-
                   <select
                     value={unitStatus}
                     onChange={(e) => setUnitStatus(e.target.value)}
@@ -351,36 +345,40 @@ export default function App() {
                     <option value="vacant">Vacant</option>
                     <option value="occupied">Occupied</option>
                   </select>
-
                   <button
                     onClick={createUnit}
-                    disabled={!unitNumber || !bhkType || !unitStatus}
+                    disabled={!unitName}
                   >
                     Add Unit
                   </button>
                 </div>
 
-                {/* Units list */}
                 {units.length > 0 && (
-                  <div className="unit-list">
-                    <ul>
-                      {units.map((u) => (
-                        <li key={u.id}>
-                          <span className="unit-pill">
-                            {u.unit_number} • {u.bhk_type} •{" "}
-                            {u.status === "vacant" ? "Vacant" : "Occupied"}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <ul className="unit-list">
+                    {units.map((u) => (
+                      <li key={u.id} className="unit-item">
+                        <span className="unit-name">{u.name}</span>
+                        <span className="unit-bhk">{u.bhk_type}</span>
+                        <span
+                          className={
+                            u.status === "vacant"
+                              ? "unit-status vacant"
+                              : "unit-status occupied"
+                          }
+                        >
+                          {u.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}
           </>
         )}
 
-        {infoMessage && <p className="info">{infoMessage}</p>}
+        {aptMessage && <p className="info">{aptMessage}</p>}
+        {unitMessage && <p className="info">{unitMessage}</p>}
         {error && <p className="error">{error}</p>}
       </div>
     </div>

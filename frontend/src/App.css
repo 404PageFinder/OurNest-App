@@ -183,3 +183,92 @@ button:disabled {
   font-size: 13px;
   margin-bottom: 4px;
 }
+
+.section {
+  margin-top: 16px;
+  text-align: left;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.apt-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.apt-item {
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.apt-item.selected {
+  border-color: #22c55e;
+  background: #ecfdf3;
+}
+
+.unit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.unit-form select {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+.unit-list {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 10px;
+}
+
+.unit-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 4px;
+}
+
+.unit-name {
+  flex: 1;
+}
+
+.unit-bhk {
+  width: 50px;
+  text-align: center;
+}
+
+.unit-status {
+  min-width: 70px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.unit-status.vacant {
+  background: #ecfdf3;
+  color: #166534;
+}
+
+.unit-status.occupied {
+  background: #fee2e2;
+  color: #b91c1c;
+}
