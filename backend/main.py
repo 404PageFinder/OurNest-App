@@ -219,7 +219,6 @@ class OccupantCreateRequest(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v):
-        # simple: allow digits + + - spaces, min 6 chars
         v = v.strip()
         if len(v) < 6:
             raise ValueError("Phone number looks too short.")
@@ -248,6 +247,76 @@ class OccupantResponse(BaseModel):
 
 class OccupantListResponse(BaseModel):
     occupants: List[OccupantResponse]
+
+
+# ---------- Pydantic models for Maintenance / Invoices ----------
+
+class InvoiceCreateRequest(BaseModel):
+    mobile: str   # owner mobile for validation
+    period_label: str  # e.g. "Jan 2025"
+    amount: int
+    due_date: str       # e.g. "2025-01-15"
+
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
+
+    @field_validator("period_label")
+    @classmethod
+    def validate_period(cls, v):
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Period label must be at least 3 characters.")
+        return v
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(cls, v):
+        if v <= 0:
+            raise ValueError("Amount must be greater than zero.")
+        return v
+
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date(cls, v):
+        v = v.strip()
+        if len(v) < 4:
+            raise ValueError("Due date looks invalid.")
+        return v
+
+
+class InvoiceResponse(BaseModel):
+    id: int
+    unit_id: int
+    period_label: str
+    amount: int
+    due_date: str
+    status: str
+    created_at: datetime | None
+    paid_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class InvoiceListResponse(BaseModel):
+    invoices: List[InvoiceResponse]
+
+
+class MarkInvoicePaidRequest(BaseModel):
+    mobile: str
+
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
 
 
 # ---------- Helper functions ----------
@@ -416,12 +485,10 @@ def create_unit(
     data: UnitCreateRequest,
     db: Session = Depends(get_db),
 ):
-    # Find user
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Check that this apartment belongs to this user
     apartment = (
         db.query(models.Apartment)
         .filter(
@@ -455,12 +522,10 @@ def list_units(
     mobile: str,
     db: Session = Depends(get_db),
 ):
-    # Find user
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Ensure apartment belongs to user
     apartment = (
         db.query(models.Apartment)
         .filter(
@@ -492,12 +557,10 @@ def create_occupant(
     data: OccupantCreateRequest,
     db: Session = Depends(get_db),
 ):
-    # Find user
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Ensure unit belongs to an apartment created by this user
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -537,12 +600,10 @@ def list_occupants(
     mobile: str,
     db: Session = Depends(get_db),
 ):
-    # Find user
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Ensure unit belongs to apartment of this user
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -566,3 +627,120 @@ def list_occupants(
     )
 
     return OccupantListResponse(occupants=occupants)
+
+
+# ---------- Maintenance / Invoice endpoints ----------
+
+@app.post("/units/{unit_id}/invoices", response_model=InvoiceResponse)
+def create_invoice(
+    unit_id: int,
+    data: InvoiceCreateRequest,
+    db: Session = Depends(get_db),
+):
+    # Validate user
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Ensure unit belongs to this user's apartment
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unit not found for this user.",
+        )
+
+    invoice = models.MaintenanceInvoice(
+        unit_id=unit.id,
+        period_label=data.period_label.strip(),
+        amount=data.amount,
+        due_date=data.due_date.strip(),
+        status="due",
+    )
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+
+    return invoice
+
+
+@app.get("/units/{unit_id}/invoices", response_model=InvoiceListResponse)
+def list_invoices(
+    unit_id: int,
+    mobile: str,
+    db: Session = Depends(get_db),
+):
+    # Validate user
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Ensure unit belongs to user's apartment
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unit not found for this user.",
+        )
+
+    invoices = (
+        db.query(models.MaintenanceInvoice)
+        .filter(models.MaintenanceInvoice.unit_id == unit.id)
+        .order_by(models.MaintenanceInvoice.created_at.desc())
+        .all()
+    )
+
+    return InvoiceListResponse(invoices=invoices)
+
+
+@app.post("/invoices/{invoice_id}/mark-paid", response_model=InvoiceResponse)
+def mark_invoice_paid(
+    invoice_id: int,
+    data: MarkInvoicePaidRequest,
+    db: Session = Depends(get_db),
+):
+    # Validate user
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Load invoice + check that its unit belongs to this user's apartment
+    invoice = (
+        db.query(models.MaintenanceInvoice)
+        .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.MaintenanceInvoice.id == invoice_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if invoice is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Invoice not found for this user.",
+        )
+
+    invoice.status = "paid"
+    invoice.paid_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(invoice)
+
+    return invoice

@@ -27,7 +27,7 @@ export default function App() {
   const [unitStatus, setUnitStatus] = useState("vacant");
   const [unitMessage, setUnitMessage] = useState("");
 
-  // Selected unit for occupants
+  // Selected unit for occupants / invoices
   const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [selectedUnitLabel, setSelectedUnitLabel] = useState("");
 
@@ -37,6 +37,13 @@ export default function App() {
   const [occPhone, setOccPhone] = useState("");
   const [occRole, setOccRole] = useState("owner");
   const [occMessage, setOccMessage] = useState("");
+
+  // Invoices
+  const [invoices, setInvoices] = useState([]);
+  const [invPeriod, setInvPeriod] = useState("");
+  const [invAmount, setInvAmount] = useState("");
+  const [invDueDate, setInvDueDate] = useState("");
+  const [invMessage, setInvMessage] = useState("");
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
 
@@ -104,7 +111,6 @@ export default function App() {
         return;
       }
 
-      // Go to apartment onboarding
       setStep("apartment");
       setAptMessage("OTP verified! Let’s onboard your apartment.");
       fetchApartments();
@@ -172,6 +178,7 @@ export default function App() {
     setSelectedUnitId(null);
     setSelectedUnitLabel("");
     setOccupants([]);
+    setInvoices([]);
     fetchUnits(apt.id);
   };
 
@@ -238,7 +245,12 @@ export default function App() {
     setOccName("");
     setOccPhone("");
     setOccRole("owner");
+    setInvMessage("");
+    setInvPeriod("");
+    setInvAmount("");
+    setInvDueDate("");
     fetchOccupants(u.id);
+    fetchInvoices(u.id);
   };
 
   const fetchOccupants = async (unitId) => {
@@ -292,11 +304,104 @@ export default function App() {
       );
       setOccName("");
       setOccPhone("");
-      setOccRole("tenant"); // often next is tenant, but your choice
+      setOccRole("tenant");
       fetchOccupants(selectedUnitId);
-      // refresh units too (status might have changed to occupied)
+
+      // refresh units too (status might change to occupied)
       if (selectedApartmentId) {
         fetchUnits(selectedApartmentId);
+      }
+    } catch {
+      setError("Could not reach server. Is backend running?");
+    }
+  };
+
+  const fetchInvoices = async (unitId) => {
+    try {
+      const res = await fetch(
+        `http://localhost:8000/units/${unitId}/invoices?mobile=${mobile}`
+      );
+      if (!res.ok) {
+        setInvoices([]);
+        return;
+      }
+      const data = await res.json();
+      setInvoices(data.invoices || []);
+    } catch {
+      setInvoices([]);
+    }
+  };
+
+  const createInvoice = async () => {
+    if (!selectedUnitId) {
+      setInvMessage("Please select a unit first.");
+      return;
+    }
+    setError("");
+    setInvMessage("");
+
+    const amountNum = parseInt(invAmount, 10);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/units/${selectedUnitId}/invoices`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile,
+            period_label: invPeriod,
+            amount: amountNum,
+            due_date: invDueDate,
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail || "Could not create invoice.");
+        return;
+      }
+
+      setInvMessage(
+        `Invoice for "${data.period_label}" created successfully!`
+      );
+      setInvPeriod("");
+      setInvAmount("");
+      setInvDueDate("");
+      fetchInvoices(selectedUnitId);
+    } catch {
+      setError("Could not reach server. Is backend running?");
+    }
+  };
+
+  const markInvoicePaid = async (invoiceId) => {
+    setError("");
+    setInvMessage("");
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/invoices/${invoiceId}/mark-paid`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mobile }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail || "Could not mark invoice as paid.");
+        return;
+      }
+
+      setInvMessage(
+        `Invoice "${data.period_label}" marked as paid.`
+      );
+      if (selectedUnitId) {
+        fetchInvoices(selectedUnitId);
       }
     } catch {
       setError("Could not reach server. Is backend running?");
@@ -349,7 +454,7 @@ export default function App() {
         {step === "apartment" && (
           <>
             <p className="welcome-text">
-              Welcome, +91 {mobile}. Manage apartments, units and occupants.
+              Welcome, +91 {mobile}. Manage apartments, units, occupants and maintenance.
             </p>
 
             {/* Apartment creation */}
@@ -470,7 +575,7 @@ export default function App() {
             {selectedUnitId && (
               <div className="section">
                 <h3 className="section-title">
-                  Occupants for unit: {selectedUnitLabel}
+                  Occupants – unit: {selectedUnitLabel}
                 </h3>
 
                 <div className="occupant-form">
@@ -522,12 +627,91 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* Maintenance / Invoices for selected unit */}
+            {selectedUnitId && (
+              <div className="section">
+                <h3 className="section-title">
+                  Maintenance & Invoices – unit: {selectedUnitLabel}
+                </h3>
+
+                <div className="invoice-form">
+                  <input
+                    placeholder='Period (e.g., "Jan 2025")'
+                    value={invPeriod}
+                    onChange={(e) => setInvPeriod(e.target.value)}
+                  />
+                  <input
+                    placeholder="Amount (e.g., 2500)"
+                    type="number"
+                    value={invAmount}
+                    onChange={(e) => setInvAmount(e.target.value)}
+                  />
+                  <input
+                    placeholder="Due date (YYYY-MM-DD)"
+                    value={invDueDate}
+                    onChange={(e) => setInvDueDate(e.target.value)}
+                  />
+                  <button
+                    onClick={createInvoice}
+                    disabled={!invPeriod || !invAmount || !invDueDate}
+                  >
+                    Create Invoice
+                  </button>
+                </div>
+
+                {invoices.length > 0 && (
+                  <table className="invoice-table">
+                    <thead>
+                      <tr>
+                        <th>Period</th>
+                        <th>Amount</th>
+                        <th>Due date</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td>{inv.period_label}</td>
+                          <td>₹{inv.amount}</td>
+                          <td>{inv.due_date}</td>
+                          <td>
+                            <span
+                              className={
+                                inv.status === "paid"
+                                  ? "badge badge-paid"
+                                  : "badge badge-due"
+                              }
+                            >
+                              {inv.status}
+                            </span>
+                          </td>
+                          <td>
+                            {inv.status !== "paid" && (
+                              <button
+                                className="btn-small"
+                                onClick={() => markInvoicePaid(inv.id)}
+                              >
+                                Mark Paid
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </>
         )}
 
         {aptMessage && <p className="info">{aptMessage}</p>}
         {unitMessage && <p className="info">{unitMessage}</p>}
         {occMessage && <p className="info">{occMessage}</p>}
+        {invMessage && <p className="info">{invMessage}</p>}
         {error && <p className="error">{error}</p>}
       </div>
     </div>

@@ -68,10 +68,32 @@ class Occupant(Base):
 
     is_active = Column(Boolean, default=True)
 
-    # For future — move-in / move-out
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class MaintenanceInvoice(Base):
+    """
+    Simple maintenance/invoice record for each unit.
+    Example:
+      period_label: "Jan 2025" or "2025-01"
+      status: "due" | "paid" | "overdue" (we'll use "due"/"paid" for now)
+    """
+
+    __tablename__ = "maintenance_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    unit_id = Column(Integer, ForeignKey("units.id"), nullable=False)
+
+    period_label = Column(String(32), nullable=False)  # e.g. "Jan 2025"
+    amount = Column(Integer, nullable=False)
+    due_date = Column(String(20), nullable=False)      # store as text "2025-01-15"
+
+    status = Column(String(20), nullable=False, default="due")  # "due" / "paid" / "overdue"
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
