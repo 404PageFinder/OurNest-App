@@ -2,18 +2,60 @@ from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
+import os
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, field_validator
+from jose import JWTError, jwt
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func, case, distinct
 
 from db import Base, engine, get_db
 import models
 
-# ---------- OTP in-memory store ----------
+# ---------- Configuration ----------
+
+SECRET_KEY = os.getenv("SECRET_KEY", "TEMP_SECRET_CHANGE_IN_PRODUCTION")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+OTP_TTL_MINUTES = 5
+MAX_ATTEMPTS = 5
+MOBILE_REGEX = r"^[6-9]\d{9}$"
+
+# ---------- FastAPI App Setup ----------
+
+app = FastAPI(
+    title="OurNest API",
+    description="Apartment Management System",
+    version="2.0.0"
+)
+
+# Add CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add compression for responses > 1KB
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Security
+security = HTTPBearer()
+
+# ---------- Database Initialization ----------
+
+Base.metadata.create_all(bind=engine)
+
+# ---------- OTP Store ----------
 
 class OtpRecord(BaseModel):
     request_id: str
@@ -22,20 +64,52 @@ class OtpRecord(BaseModel):
     created_at: datetime
     expires_at: datetime
     attempts: int = 0
-    status: str = "pending"  # pending | verified | expired
-
+    status: str = "pending"
 
 otp_store: Dict[str, OtpRecord] = {}
 
-SECRET_KEY = "TEMP_SECRET"  # TODO: move to env later
+# ---------- Helper Functions ----------
 
-OTP_TTL_MINUTES = 5
-MAX_ATTEMPTS = 5
+def hash_otp(otp: str, mobile: str) -> str:
+    """Hash OTP with mobile number as salt"""
+    return hmac.new(
+        SECRET_KEY.encode(),
+        f"{mobile}:{otp}".encode(),
+        hashlib.sha256
+    ).hexdigest()
 
-MOBILE_REGEX = r"^[6-9]\d{9}$"
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Verify JWT token and return mobile number"""
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        mobile: str = payload.get("sub")
+        
+        if mobile is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials"
+            )
+        return mobile
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials"
+        )
 
-# ---------- Pydantic models for Auth ----------
+# ---------- Pydantic Models for Auth ----------
 
 class SendOtpRequest(BaseModel):
     mobile: str
@@ -48,11 +122,10 @@ class SendOtpRequest(BaseModel):
             raise ValueError("Invalid Indian mobile number.")
         return v
 
-
 class SendOtpResponse(BaseModel):
     request_id: str
     message: str
-
+    expires_in_minutes: int
 
 class VerifyOtpRequest(BaseModel):
     request_id: str
@@ -74,27 +147,18 @@ class VerifyOtpRequest(BaseModel):
             raise ValueError("OTP must be 4 digits.")
         return v
 
-
 class VerifyOtpResponse(BaseModel):
     success: bool
     message: str
+    access_token: str
+    token_type: str = "bearer"
 
-
-# ---------- Pydantic models for Apartments ----------
+# ---------- Pydantic Models for Apartments ----------
 
 class ApartmentCreateRequest(BaseModel):
-    mobile: str  # who is creating this apartment
     name: str
     city: str
     total_units: int
-
-    @field_validator("mobile")
-    @classmethod
-    def validate_mobile(cls, v):
-        import re
-        if not re.fullmatch(MOBILE_REGEX, v):
-            raise ValueError("Invalid Indian mobile number.")
-        return v
 
     @field_validator("name")
     @classmethod
@@ -119,7 +183,6 @@ class ApartmentCreateRequest(BaseModel):
             raise ValueError("Total units must be greater than zero.")
         return v
 
-
 class ApartmentResponse(BaseModel):
     id: int
     name: str
@@ -129,26 +192,15 @@ class ApartmentResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
 class ApartmentListResponse(BaseModel):
     apartments: List[ApartmentResponse]
 
-
-# ---------- Pydantic models for Units ----------
+# ---------- Pydantic Models for Units ----------
 
 class UnitCreateRequest(BaseModel):
-    mobile: str  # user who owns the apartment
-    name: str    # e.g., "101", "A-203"
-    bhk_type: str  # "2BHK" / "3BHK"
-    status: str    # "vacant" / "occupied"
-
-    @field_validator("mobile")
-    @classmethod
-    def validate_mobile(cls, v):
-        import re
-        if not re.fullmatch(MOBILE_REGEX, v):
-            raise ValueError("Invalid Indian mobile number.")
-        return v
+    name: str
+    bhk_type: str
+    status: str = "vacant"
 
     @field_validator("name")
     @classmethod
@@ -176,6 +228,12 @@ class UnitCreateRequest(BaseModel):
             raise ValueError("status must be 'vacant' or 'occupied'.")
         return v
 
+class BulkUnitCreateRequest(BaseModel):
+    """Create multiple units at once"""
+    start_number: int
+    end_number: int
+    prefix: str = ""
+    bhk_type: str = "2BHK"
 
 class UnitResponse(BaseModel):
     id: int
@@ -187,26 +245,15 @@ class UnitResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
 class UnitListResponse(BaseModel):
     units: List[UnitResponse]
 
-
-# ---------- Pydantic models for Occupants ----------
+# ---------- Pydantic Models for Occupants ----------
 
 class OccupantCreateRequest(BaseModel):
-    mobile: str  # owner (user) mobile to validate permissions
     name: str
     phone: str
-    role: str  # "owner" or "tenant"
-
-    @field_validator("mobile")
-    @classmethod
-    def validate_mobile(cls, v):
-        import re
-        if not re.fullmatch(MOBILE_REGEX, v):
-            raise ValueError("Invalid Indian mobile number.")
-        return v
+    role: str
 
     @field_validator("name")
     @classmethod
@@ -232,7 +279,6 @@ class OccupantCreateRequest(BaseModel):
             raise ValueError("Role must be 'owner' or 'tenant'.")
         return v
 
-
 class OccupantResponse(BaseModel):
     id: int
     unit_id: int
@@ -244,26 +290,15 @@ class OccupantResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
 class OccupantListResponse(BaseModel):
     occupants: List[OccupantResponse]
 
-
-# ---------- Pydantic models for Maintenance / Invoices ----------
+# ---------- Pydantic Models for Invoices ----------
 
 class InvoiceCreateRequest(BaseModel):
-    mobile: str   # owner mobile for validation
-    period_label: str  # e.g. "Jan 2025"
+    period_label: str
     amount: int
-    due_date: str       # e.g. "2025-01-15"
-
-    @field_validator("mobile")
-    @classmethod
-    def validate_mobile(cls, v):
-        import re
-        if not re.fullmatch(MOBILE_REGEX, v):
-            raise ValueError("Invalid Indian mobile number.")
-        return v
+    due_date: str
 
     @field_validator("period_label")
     @classmethod
@@ -288,7 +323,6 @@ class InvoiceCreateRequest(BaseModel):
             raise ValueError("Due date looks invalid.")
         return v
 
-
 class InvoiceResponse(BaseModel):
     id: int
     unit_id: int
@@ -302,24 +336,13 @@ class InvoiceResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
 class InvoiceListResponse(BaseModel):
     invoices: List[InvoiceResponse]
 
-
 class MarkInvoicePaidRequest(BaseModel):
-    mobile: str
+    pass  # No body needed, just auth
 
-    @field_validator("mobile")
-    @classmethod
-    def validate_mobile(cls, v):
-        import re
-        if not re.fullmatch(MOBILE_REGEX, v):
-            raise ValueError("Invalid Indian mobile number.")
-        return v
-
-
-# ---------- Pydantic models for Dashboard ----------
+# ---------- Pydantic Models for Dashboard ----------
 
 class ApartmentDashboardItemResponse(BaseModel):
     apartment_id: int
@@ -331,146 +354,128 @@ class ApartmentDashboardItemResponse(BaseModel):
     total_due_amount: int
     total_paid_amount: int
 
-    class Config:
-        from_attributes = True
-
-
 class DashboardResponse(BaseModel):
     apartments: List[ApartmentDashboardItemResponse]
     overall_due_amount: int
     overall_paid_amount: int
 
-
-# ---------- Helper functions ----------
-
-def generate_otp() -> str:
-    return f"{secrets.randbelow(10000):04d}"  # 0000–9999
-
-
-def hash_otp(mobile: str, request_id: str, otp: str) -> str:
-    msg = f"{mobile}{request_id}{otp}".encode()
-    return hmac.new(SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
-
-
-def cleanup_expired():
-    now = datetime.utcnow()
-    to_delete = [
-        req_id for req_id, record in otp_store.items()
-        if record.expires_at < now
-    ]
-    for req_id in to_delete:
-        del otp_store[req_id]
-
-
-# ---------- FastAPI app ----------
-
-app = FastAPI(title="OurNest Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],   # in prod, restrict this
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-
+# ---------- Health Check ----------
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "ournest-backend"}
+    return {"status": "ok", "version": "2.0.0"}
 
-
-# ---------- Auth / OTP endpoints ----------
+# ---------- Auth Endpoints ----------
 
 @app.post("/auth/send-otp", response_model=SendOtpResponse)
-def send_otp(data: SendOtpRequest):
-    cleanup_expired()
-
-    request_id = secrets.token_hex(8)
-    otp = generate_otp()
-    otp_hash = hash_otp(data.mobile, request_id, otp)
-
-    record = OtpRecord(
+def send_otp(data: SendOtpRequest, db: Session = Depends(get_db)):
+    """Send OTP to mobile number"""
+    request_id = secrets.token_urlsafe(32)
+    otp = f"{secrets.randbelow(10000):04d}"
+    
+    now = datetime.utcnow()
+    expires_at = now + timedelta(minutes=OTP_TTL_MINUTES)
+    
+    otp_hash = hash_otp(otp, data.mobile)
+    
+    otp_store[request_id] = OtpRecord(
         request_id=request_id,
         mobile=data.mobile,
         otp_hash=otp_hash,
-        created_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES),
+        created_at=now,
+        expires_at=expires_at,
+        attempts=0,
+        status="pending"
     )
-
-    otp_store[request_id] = record
-
-    print(f"[DEV] OTP for {data.mobile}: {otp} (request_id={request_id})")
-
+    
+    print(f"[DEV MODE] OTP for {data.mobile}: {otp}")
+    
     return SendOtpResponse(
         request_id=request_id,
-        message="OTP sent successfully.",
+        message=f"OTP sent to {data.mobile}",
+        expires_in_minutes=OTP_TTL_MINUTES
     )
-
 
 @app.post("/auth/verify-otp", response_model=VerifyOtpResponse)
 def verify_otp(data: VerifyOtpRequest, db: Session = Depends(get_db)):
-    cleanup_expired()
-
+    """Verify OTP and return JWT token"""
     record = otp_store.get(data.request_id)
-
-    if not record:
-        raise HTTPException(status_code=400, detail="Invalid request ID.")
-
-    if record.mobile != data.mobile:
-        raise HTTPException(status_code=400, detail="Mobile number mismatch.")
-
-    if record.expires_at < datetime.utcnow():
-        record.status = "expired"
-        raise HTTPException(status_code=400, detail="OTP expired. Please request a new one.")
-
-    if record.attempts >= MAX_ATTEMPTS:
-        raise HTTPException(status_code=400, detail="Maximum attempts exceeded. Please request a new OTP.")
-
-    record.attempts += 1
-
-    expected_hash = record.otp_hash
-    received_hash = hash_otp(data.mobile, data.request_id, data.otp)
-
-    if not hmac.compare_digest(expected_hash, received_hash):
-        raise HTTPException(status_code=400, detail="Incorrect OTP. Please try again.")
-
-    record.status = "verified"
-
-    # Create or update user record
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
-
-    if user is None:
-        user = models.User(
-            mobile=data.mobile,
-            is_active=True,
-            last_login_at=datetime.utcnow(),
+    
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="OTP request not found or expired."
         )
+    
+    if record.status == "verified":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP already verified."
+        )
+    
+    if record.mobile != data.mobile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mobile number mismatch."
+        )
+    
+    if datetime.utcnow() > record.expires_at:
+        record.status = "expired"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP has expired."
+        )
+    
+    if record.attempts >= MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts."
+        )
+    
+    record.attempts += 1
+    input_hash = hash_otp(data.otp, data.mobile)
+    
+    if input_hash != record.otp_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP."
+        )
+    
+    record.status = "verified"
+    
+    # Get or create user
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        user = models.User(mobile=data.mobile, is_active=True)
         db.add(user)
+        db.commit()
+        db.refresh(user)
     else:
-        user.is_active = True
         user.last_login_at = datetime.utcnow()
-
-    db.commit()
-
+        db.commit()
+    
+    # Create JWT token
+    access_token = create_access_token(data={"sub": user.mobile})
+    
     return VerifyOtpResponse(
         success=True,
-        message="OTP verified and user logged in."
+        message="OTP verified successfully",
+        access_token=access_token
     )
 
-
-# ---------- Apartment endpoints ----------
+# ---------- Apartment Endpoints ----------
 
 @app.post("/apartments", response_model=ApartmentResponse)
-def create_apartment(data: ApartmentCreateRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+def create_apartment(
+    data: ApartmentCreateRequest,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Create new apartment (requires auth)"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     apartment = models.Apartment(
         name=data.name.strip(),
         city=data.city.strip(),
@@ -480,37 +485,42 @@ def create_apartment(data: ApartmentCreateRequest, db: Session = Depends(get_db)
     db.add(apartment)
     db.commit()
     db.refresh(apartment)
-
+    
     return apartment
 
-
 @app.get("/apartments", response_model=ApartmentListResponse)
-def list_apartments(mobile: str, db: Session = Depends(get_db)):
+def list_apartments(
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """List all apartments for authenticated user"""
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     apartments = (
         db.query(models.Apartment)
         .filter(models.Apartment.created_by_user_id == user.id)
+        .order_by(models.Apartment.created_at.desc())
         .all()
     )
-
+    
     return ApartmentListResponse(apartments=apartments)
 
-
-# ---------- Unit endpoints ----------
+# ---------- Unit Endpoints ----------
 
 @app.post("/apartments/{apartment_id}/units", response_model=UnitResponse)
 def create_unit(
     apartment_id: int,
     data: UnitCreateRequest,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    """Create new unit in apartment"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     apartment = (
         db.query(models.Apartment)
         .filter(
@@ -524,7 +534,22 @@ def create_unit(
             status_code=404,
             detail="Apartment not found for this user.",
         )
-
+    
+    # Check for duplicate unit name
+    existing = (
+        db.query(models.Unit)
+        .filter(
+            models.Unit.apartment_id == apartment_id,
+            models.Unit.name == data.name.strip()
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unit {data.name} already exists in this apartment."
+        )
+    
     unit = models.Unit(
         apartment_id=apartment.id,
         name=data.name.strip(),
@@ -534,20 +559,21 @@ def create_unit(
     db.add(unit)
     db.commit()
     db.refresh(unit)
-
+    
     return unit
 
-
-@app.get("/apartments/{apartment_id}/units", response_model=UnitListResponse)
-def list_units(
+@app.post("/apartments/{apartment_id}/units/bulk", response_model=UnitListResponse)
+def bulk_create_units(
     apartment_id: int,
-    mobile: str,
+    data: BulkUnitCreateRequest,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
+    """Create multiple units at once"""
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     apartment = (
         db.query(models.Apartment)
         .filter(
@@ -557,32 +583,77 @@ def list_units(
         .first()
     )
     if apartment is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Apartment not found for this user.",
+        raise HTTPException(status_code=404, detail="Apartment not found.")
+    
+    if data.start_number > data.end_number:
+        raise HTTPException(status_code=400, detail="Start number must be <= end number.")
+    
+    if data.end_number - data.start_number > 100:
+        raise HTTPException(status_code=400, detail="Cannot create more than 100 units at once.")
+    
+    units = []
+    for i in range(data.start_number, data.end_number + 1):
+        unit = models.Unit(
+            apartment_id=apartment_id,
+            name=f"{data.prefix}{i}",
+            bhk_type=data.bhk_type.upper(),
+            status="vacant"
         )
-
-    units = (
-        db.query(models.Unit)
-        .filter(models.Unit.apartment_id == apartment.id)
-        .all()
-    )
-
+        units.append(unit)
+    
+    db.add_all(units)
+    db.commit()
+    
     return UnitListResponse(units=units)
 
+@app.get("/apartments/{apartment_id}/units", response_model=UnitListResponse)
+def list_units(
+    apartment_id: int,
+    mobile: str = Depends(verify_token),
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """List units with optional filtering"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.id == apartment_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if apartment is None:
+        raise HTTPException(status_code=404, detail="Apartment not found.")
+    
+    query = db.query(models.Unit).filter(models.Unit.apartment_id == apartment.id)
+    
+    if status:
+        query = query.filter(models.Unit.status == status.lower())
+    
+    units = query.order_by(models.Unit.name).offset(skip).limit(limit).all()
+    
+    return UnitListResponse(units=units)
 
-# ---------- Occupant endpoints ----------
+# ---------- Occupant Endpoints ----------
 
 @app.post("/units/{unit_id}/occupants", response_model=OccupantResponse)
 def create_occupant(
     unit_id: int,
     data: OccupantCreateRequest,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    """Add occupant to unit"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -593,11 +664,8 @@ def create_occupant(
         .first()
     )
     if unit is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Unit not found for this user.",
-        )
-
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
     occupant = models.Occupant(
         unit_id=unit.id,
         name=data.name.strip(),
@@ -606,26 +674,26 @@ def create_occupant(
         is_active=True,
     )
     db.add(occupant)
-
-    # If an active occupant is added, mark unit as occupied
+    
+    # Update unit status
     unit.status = "occupied"
-
+    
     db.commit()
     db.refresh(occupant)
-
+    
     return occupant
-
 
 @app.get("/units/{unit_id}/occupants", response_model=OccupantListResponse)
 def list_occupants(
     unit_id: int,
-    mobile: str,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
+    """List occupants of a unit"""
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -636,33 +704,31 @@ def list_occupants(
         .first()
     )
     if unit is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Unit not found for this user.",
-        )
-
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
     occupants = (
         db.query(models.Occupant)
         .filter(models.Occupant.unit_id == unit.id)
         .order_by(models.Occupant.created_at.desc())
         .all()
     )
-
+    
     return OccupantListResponse(occupants=occupants)
 
-
-# ---------- Maintenance / Invoice endpoints ----------
+# ---------- Invoice Endpoints ----------
 
 @app.post("/units/{unit_id}/invoices", response_model=InvoiceResponse)
 def create_invoice(
     unit_id: int,
     data: InvoiceCreateRequest,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    """Create maintenance invoice"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -673,11 +739,8 @@ def create_invoice(
         .first()
     )
     if unit is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Unit not found for this user.",
-        )
-
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
     invoice = models.MaintenanceInvoice(
         unit_id=unit.id,
         period_label=data.period_label.strip(),
@@ -688,24 +751,21 @@ def create_invoice(
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
-
+    
     return invoice
-
 
 @app.get("/units/{unit_id}/invoices", response_model=InvoiceListResponse)
 def list_invoices(
     unit_id: int,
-    mobile: str,
-    month: Optional[str] = None,  # format: "YYYY-MM"
+    mobile: str = Depends(verify_token),
+    month: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """
-    Optional `month` filter: pass 'YYYY-MM' and it will match due_date starting with that.
-    """
+    """List invoices with optional month filter"""
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -716,35 +776,31 @@ def list_invoices(
         .first()
     )
     if unit is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Unit not found for this user.",
-        )
-
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
     query = (
         db.query(models.MaintenanceInvoice)
         .filter(models.MaintenanceInvoice.unit_id == unit.id)
     )
-
+    
     if month:
-        # due_date is stored as "YYYY-MM-DD" string, so prefix match works
         query = query.filter(models.MaintenanceInvoice.due_date.like(f"{month}%"))
-
+    
     invoices = query.order_by(models.MaintenanceInvoice.created_at.desc()).all()
-
+    
     return InvoiceListResponse(invoices=invoices)
-
 
 @app.post("/invoices/{invoice_id}/mark-paid", response_model=InvoiceResponse)
 def mark_invoice_paid(
     invoice_id: int,
-    data: MarkInvoicePaidRequest,
+    mobile: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    """Mark invoice as paid"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     invoice = (
         db.query(models.MaintenanceInvoice)
         .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
@@ -756,73 +812,68 @@ def mark_invoice_paid(
         .first()
     )
     if invoice is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Invoice not found for this user.",
-        )
-
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    
     invoice.status = "paid"
     invoice.paid_at = datetime.utcnow()
-
+    
     db.commit()
     db.refresh(invoice)
-
+    
     return invoice
 
-
-# ---------- Dashboard endpoint ----------
+# ---------- Dashboard Endpoint ----------
 
 @app.get("/dashboard", response_model=DashboardResponse)
-def get_dashboard(mobile: str, db: Session = Depends(get_db)):
-    """
-    Returns per-apartment stats + overall totals for a given user (mobile).
-    """
+def get_dashboard(mobile: str = Depends(verify_token), db: Session = Depends(get_db)):
+    """Get dashboard statistics - optimized query"""
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
-        raise HTTPException(status_code=404, detail="User not found for this mobile.")
-
+        raise HTTPException(status_code=404, detail="User not found.")
+    
     apartments = (
         db.query(models.Apartment)
         .filter(models.Apartment.created_by_user_id == user.id)
         .all()
     )
-
+    
     items: List[ApartmentDashboardItemResponse] = []
     overall_due = 0
     overall_paid = 0
-
+    
     for apt in apartments:
-        # units
-        units = (
-            db.query(models.Unit)
+        # Optimized query with aggregations
+        unit_stats = (
+            db.query(
+                func.count(distinct(models.Unit.id)).label('total_units'),
+                func.sum(case((models.Unit.status == 'occupied', 1), else_=0)).label('occupied')
+            )
             .filter(models.Unit.apartment_id == apt.id)
-            .all()
+            .first()
         )
-        total_units = len(units)
-        occupied = sum(1 for u in units if u.status == "occupied")
-        vacant = total_units - occupied
-
-        # invoices (for units in this apartment)
-        invoices = (
-            db.query(models.MaintenanceInvoice)
+        
+        invoice_stats = (
+            db.query(
+                func.count(models.MaintenanceInvoice.id).label('total_invoices'),
+                func.sum(case((models.MaintenanceInvoice.status == 'paid', models.MaintenanceInvoice.amount), else_=0)).label('paid'),
+                func.sum(case((models.MaintenanceInvoice.status != 'paid', models.MaintenanceInvoice.amount), else_=0)).label('due')
+            )
             .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
             .filter(models.Unit.apartment_id == apt.id)
-            .all()
+            .first()
         )
-
-        total_invoices = len(invoices)
-        due_amount = 0
-        paid_amount = 0
-        for inv in invoices:
-            if inv.status == "paid":
-                paid_amount += inv.amount
-            else:
-                # treat non-paid as due (includes "due", "overdue")
-                due_amount += inv.amount
-
+        
+        total_units = unit_stats.total_units or 0
+        occupied = unit_stats.occupied or 0
+        vacant = total_units - occupied
+        
+        total_invoices = invoice_stats.total_invoices or 0
+        due_amount = invoice_stats.due or 0
+        paid_amount = invoice_stats.paid or 0
+        
         overall_due += due_amount
         overall_paid += paid_amount
-
+        
         items.append(
             ApartmentDashboardItemResponse(
                 apartment_id=apt.id,
@@ -835,9 +886,13 @@ def get_dashboard(mobile: str, db: Session = Depends(get_db)):
                 total_paid_amount=paid_amount,
             )
         )
-
+    
     return DashboardResponse(
         apartments=items,
         overall_due_amount=overall_due,
         overall_paid_amount=overall_paid,
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
