@@ -434,3 +434,29 @@ button:disabled {
   font-size: 11px;
   color: #4b5563;
 }
+
+.invoice-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.invoice-filter-label {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.btn-ghost {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  background: #f3f4f6;
+}

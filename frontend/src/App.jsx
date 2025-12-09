@@ -44,6 +44,7 @@ export default function App() {
   const [invAmount, setInvAmount] = useState("");
   const [invDueDate, setInvDueDate] = useState("");
   const [invMessage, setInvMessage] = useState("");
+  const [invFilterMonth, setInvFilterMonth] = useState(""); // YYYY-MM
 
   // Dashboard
   const [dashboard, setDashboard] = useState(null);
@@ -273,7 +274,7 @@ export default function App() {
     setInvAmount("");
     setInvDueDate("");
     fetchOccupants(u.id);
-    fetchInvoices(u.id);
+    fetchInvoices(u.id, invFilterMonth || undefined);
   };
 
   const fetchOccupants = async (unitId) => {
@@ -339,11 +340,13 @@ export default function App() {
     }
   };
 
-  const fetchInvoices = async (unitId) => {
+  const fetchInvoices = async (unitId, month) => {
     try {
-      const res = await fetch(
-        `http://localhost:8000/units/${unitId}/invoices?mobile=${mobile}`
-      );
+      let url = `http://localhost:8000/units/${unitId}/invoices?mobile=${mobile}`;
+      if (month) {
+        url += `&month=${month}`;
+      }
+      const res = await fetch(url);
       if (!res.ok) {
         setInvoices([]);
         return;
@@ -393,7 +396,7 @@ export default function App() {
       setInvPeriod("");
       setInvAmount("");
       setInvDueDate("");
-      fetchInvoices(selectedUnitId);
+      fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
@@ -425,7 +428,7 @@ export default function App() {
         `Invoice "${data.period_label}" marked as paid.`
       );
       if (selectedUnitId) {
-        fetchInvoices(selectedUnitId);
+        fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       }
       fetchDashboard();
     } catch {
@@ -438,6 +441,17 @@ export default function App() {
     if (total === 0) return "0%";
     const pct = Math.round((item.total_paid_amount * 100) / total);
     return `${pct}%`;
+  };
+
+  const handleApplyInvoiceFilter = () => {
+    if (!selectedUnitId) return;
+    fetchInvoices(selectedUnitId, invFilterMonth || undefined);
+  };
+
+  const handleClearInvoiceFilter = () => {
+    if (!selectedUnitId) return;
+    setInvFilterMonth("");
+    fetchInvoices(selectedUnitId);
   };
 
   return (
@@ -710,6 +724,32 @@ export default function App() {
                 <h3 className="section-title">
                   Maintenance & Invoices – unit: {selectedUnitLabel}
                 </h3>
+
+                {/* Filter row */}
+                <div className="invoice-filter">
+                  <label className="invoice-filter-label">
+                    Filter by month:
+                  </label>
+                  <input
+                    type="month"
+                    value={invFilterMonth}
+                    onChange={(e) => setInvFilterMonth(e.target.value)}
+                  />
+                  <button
+                    className="btn-small"
+                    onClick={handleApplyInvoiceFilter}
+                  >
+                    Apply
+                  </button>
+                  {invFilterMonth && (
+                    <button
+                      className="btn-ghost"
+                      onClick={handleClearInvoiceFilter}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
 
                 <div className="invoice-form">
                   <input

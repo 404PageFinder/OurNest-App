@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -696,8 +696,12 @@ def create_invoice(
 def list_invoices(
     unit_id: int,
     mobile: str,
+    month: Optional[str] = None,  # format: "YYYY-MM"
     db: Session = Depends(get_db),
 ):
+    """
+    Optional `month` filter: pass 'YYYY-MM' and it will match due_date starting with that.
+    """
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
@@ -717,12 +721,16 @@ def list_invoices(
             detail="Unit not found for this user.",
         )
 
-    invoices = (
+    query = (
         db.query(models.MaintenanceInvoice)
         .filter(models.MaintenanceInvoice.unit_id == unit.id)
-        .order_by(models.MaintenanceInvoice.created_at.desc())
-        .all()
     )
+
+    if month:
+        # due_date is stored as "YYYY-MM-DD" string, so prefix match works
+        query = query.filter(models.MaintenanceInvoice.due_date.like(f"{month}%"))
+
+    invoices = query.order_by(models.MaintenanceInvoice.created_at.desc()).all()
 
     return InvoiceListResponse(invoices=invoices)
 
