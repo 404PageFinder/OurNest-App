@@ -52,3 +52,26 @@ class Unit(Base):
     status = Column(String(20), nullable=False, default="vacant")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Occupant(Base):
+    __tablename__ = "occupants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    unit_id = Column(Integer, ForeignKey("units.id"), nullable=False)
+
+    # "owner" or "tenant"
+    role = Column(String(20), nullable=False)
+
+    name = Column(String(255), nullable=False)
+    phone = Column(String(20), nullable=False)
+
+    is_active = Column(Boolean, default=True)
+
+    # For future — move-in / move-out
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

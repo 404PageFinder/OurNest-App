@@ -27,6 +27,17 @@ export default function App() {
   const [unitStatus, setUnitStatus] = useState("vacant");
   const [unitMessage, setUnitMessage] = useState("");
 
+  // Selected unit for occupants
+  const [selectedUnitId, setSelectedUnitId] = useState(null);
+  const [selectedUnitLabel, setSelectedUnitLabel] = useState("");
+
+  // Occupants
+  const [occupants, setOccupants] = useState([]);
+  const [occName, setOccName] = useState("");
+  const [occPhone, setOccPhone] = useState("");
+  const [occRole, setOccRole] = useState("owner");
+  const [occMessage, setOccMessage] = useState("");
+
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
 
   // Check backend on load
@@ -158,6 +169,9 @@ export default function App() {
     setSelectedApartmentName(apt.name);
     setUnitMessage("");
     setUnits([]);
+    setSelectedUnitId(null);
+    setSelectedUnitLabel("");
+    setOccupants([]);
     fetchUnits(apt.id);
   };
 
@@ -217,6 +231,78 @@ export default function App() {
     }
   };
 
+  const handleSelectUnit = (u) => {
+    setSelectedUnitId(u.id);
+    setSelectedUnitLabel(`${u.name} (${u.bhk_type}, ${u.status})`);
+    setOccMessage("");
+    setOccName("");
+    setOccPhone("");
+    setOccRole("owner");
+    fetchOccupants(u.id);
+  };
+
+  const fetchOccupants = async (unitId) => {
+    try {
+      const res = await fetch(
+        `http://localhost:8000/units/${unitId}/occupants?mobile=${mobile}`
+      );
+      if (!res.ok) {
+        setOccupants([]);
+        return;
+      }
+      const data = await res.json();
+      setOccupants(data.occupants || []);
+    } catch {
+      setOccupants([]);
+    }
+  };
+
+  const createOccupant = async () => {
+    if (!selectedUnitId) {
+      setOccMessage("Please select a unit first.");
+      return;
+    }
+    setError("");
+    setOccMessage("");
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/units/${selectedUnitId}/occupants`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mobile,
+            name: occName,
+            phone: occPhone,
+            role: occRole,
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail || "Could not create occupant.");
+        return;
+      }
+
+      setOccMessage(
+        `Occupant "${data.name}" (${data.role}) added successfully!`
+      );
+      setOccName("");
+      setOccPhone("");
+      setOccRole("tenant"); // often next is tenant, but your choice
+      fetchOccupants(selectedUnitId);
+      // refresh units too (status might have changed to occupied)
+      if (selectedApartmentId) {
+        fetchUnits(selectedApartmentId);
+      }
+    } catch {
+      setError("Could not reach server. Is backend running?");
+    }
+  };
+
   return (
     <div className="screen">
       <div className="card">
@@ -263,7 +349,7 @@ export default function App() {
         {step === "apartment" && (
           <>
             <p className="welcome-text">
-              Welcome, +91 {mobile}. Onboard your apartment and units.
+              Welcome, +91 {mobile}. Manage apartments, units and occupants.
             </p>
 
             {/* Apartment creation */}
@@ -320,7 +406,7 @@ export default function App() {
             {selectedApartmentId && (
               <div className="section">
                 <h3 className="section-title">
-                  Units for: {selectedApartmentName}
+                  Units in: {selectedApartmentName}
                 </h3>
 
                 <div className="unit-form">
@@ -345,10 +431,7 @@ export default function App() {
                     <option value="vacant">Vacant</option>
                     <option value="occupied">Occupied</option>
                   </select>
-                  <button
-                    onClick={createUnit}
-                    disabled={!unitName}
-                  >
+                  <button onClick={createUnit} disabled={!unitName}>
                     Add Unit
                   </button>
                 </div>
@@ -356,7 +439,15 @@ export default function App() {
                 {units.length > 0 && (
                   <ul className="unit-list">
                     {units.map((u) => (
-                      <li key={u.id} className="unit-item">
+                      <li
+                        key={u.id}
+                        className={
+                          u.id === selectedUnitId
+                            ? "unit-item unit-selected"
+                            : "unit-item"
+                        }
+                        onClick={() => handleSelectUnit(u)}
+                      >
                         <span className="unit-name">{u.name}</span>
                         <span className="unit-bhk">{u.bhk_type}</span>
                         <span
@@ -374,11 +465,69 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* Occupants for selected unit */}
+            {selectedUnitId && (
+              <div className="section">
+                <h3 className="section-title">
+                  Occupants for unit: {selectedUnitLabel}
+                </h3>
+
+                <div className="occupant-form">
+                  <input
+                    placeholder="Name"
+                    value={occName}
+                    onChange={(e) => setOccName(e.target.value)}
+                  />
+                  <input
+                    placeholder="Phone"
+                    value={occPhone}
+                    onChange={(e) => setOccPhone(e.target.value)}
+                  />
+                  <select
+                    value={occRole}
+                    onChange={(e) => setOccRole(e.target.value)}
+                  >
+                    <option value="owner">Owner</option>
+                    <option value="tenant">Tenant</option>
+                  </select>
+                  <button
+                    onClick={createOccupant}
+                    disabled={!occName || !occPhone}
+                  >
+                    Add Occupant
+                  </button>
+                </div>
+
+                {occupants.length > 0 && (
+                  <ul className="occupant-list">
+                    {occupants.map((o) => (
+                      <li key={o.id} className="occupant-item">
+                        <div>
+                          <strong>{o.name}</strong> ({o.role})
+                        </div>
+                        <div className="occupant-phone">{o.phone}</div>
+                        <div
+                          className={
+                            o.is_active
+                              ? "occupant-status active"
+                              : "occupant-status inactive"
+                          }
+                        >
+                          {o.is_active ? "Active" : "Inactive"}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </>
         )}
 
         {aptMessage && <p className="info">{aptMessage}</p>}
         {unitMessage && <p className="info">{unitMessage}</p>}
+        {occMessage && <p className="info">{occMessage}</p>}
         {error && <p className="error">{error}</p>}
       </div>
     </div>

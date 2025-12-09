@@ -192,6 +192,64 @@ class UnitListResponse(BaseModel):
     units: List[UnitResponse]
 
 
+# ---------- Pydantic models for Occupants ----------
+
+class OccupantCreateRequest(BaseModel):
+    mobile: str  # owner (user) mobile to validate permissions
+    name: str
+    phone: str
+    role: str  # "owner" or "tenant"
+
+    @field_validator("mobile")
+    @classmethod
+    def validate_mobile(cls, v):
+        import re
+        if not re.fullmatch(MOBILE_REGEX, v):
+            raise ValueError("Invalid Indian mobile number.")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Name must be at least 2 characters.")
+        return v
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        # simple: allow digits + + - spaces, min 6 chars
+        v = v.strip()
+        if len(v) < 6:
+            raise ValueError("Phone number looks too short.")
+        return v
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v):
+        v = v.lower()
+        if v not in {"owner", "tenant"}:
+            raise ValueError("Role must be 'owner' or 'tenant'.")
+        return v
+
+
+class OccupantResponse(BaseModel):
+    id: int
+    unit_id: int
+    name: str
+    phone: str
+    role: str
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class OccupantListResponse(BaseModel):
+    occupants: List[OccupantResponse]
+
+
 # ---------- Helper functions ----------
 
 def generate_otp() -> str:
@@ -424,3 +482,87 @@ def list_units(
     )
 
     return UnitListResponse(units=units)
+
+
+# ---------- Occupant endpoints ----------
+
+@app.post("/units/{unit_id}/occupants", response_model=OccupantResponse)
+def create_occupant(
+    unit_id: int,
+    data: OccupantCreateRequest,
+    db: Session = Depends(get_db),
+):
+    # Find user
+    user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Ensure unit belongs to an apartment created by this user
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unit not found for this user.",
+        )
+
+    occupant = models.Occupant(
+        unit_id=unit.id,
+        name=data.name.strip(),
+        phone=data.phone.strip(),
+        role=data.role.lower(),
+        is_active=True,
+    )
+    db.add(occupant)
+
+    # If an active occupant is added, mark unit as occupied
+    unit.status = "occupied"
+
+    db.commit()
+    db.refresh(occupant)
+
+    return occupant
+
+
+@app.get("/units/{unit_id}/occupants", response_model=OccupantListResponse)
+def list_occupants(
+    unit_id: int,
+    mobile: str,
+    db: Session = Depends(get_db),
+):
+    # Find user
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    # Ensure unit belongs to apartment of this user
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Unit not found for this user.",
+        )
+
+    occupants = (
+        db.query(models.Occupant)
+        .filter(models.Occupant.unit_id == unit.id)
+        .order_by(models.Occupant.created_at.desc())
+        .all()
+    )
+
+    return OccupantListResponse(occupants=occupants)
