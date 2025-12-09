@@ -319,6 +319,28 @@ class MarkInvoicePaidRequest(BaseModel):
         return v
 
 
+# ---------- Pydantic models for Dashboard ----------
+
+class ApartmentDashboardItemResponse(BaseModel):
+    apartment_id: int
+    apartment_name: str
+    total_units: int
+    occupied_units: int
+    vacant_units: int
+    total_invoices: int
+    total_due_amount: int
+    total_paid_amount: int
+
+    class Config:
+        from_attributes = True
+
+
+class DashboardResponse(BaseModel):
+    apartments: List[ApartmentDashboardItemResponse]
+    overall_due_amount: int
+    overall_paid_amount: int
+
+
 # ---------- Helper functions ----------
 
 def generate_otp() -> str:
@@ -637,12 +659,10 @@ def create_invoice(
     data: InvoiceCreateRequest,
     db: Session = Depends(get_db),
 ):
-    # Validate user
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Ensure unit belongs to this user's apartment
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -678,12 +698,10 @@ def list_invoices(
     mobile: str,
     db: Session = Depends(get_db),
 ):
-    # Validate user
     user = db.query(models.User).filter(models.User.mobile == mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Ensure unit belongs to user's apartment
     unit = (
         db.query(models.Unit)
         .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
@@ -715,12 +733,10 @@ def mark_invoice_paid(
     data: MarkInvoicePaidRequest,
     db: Session = Depends(get_db),
 ):
-    # Validate user
     user = db.query(models.User).filter(models.User.mobile == data.mobile).first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found for this mobile.")
 
-    # Load invoice + check that its unit belongs to this user's apartment
     invoice = (
         db.query(models.MaintenanceInvoice)
         .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
@@ -744,3 +760,76 @@ def mark_invoice_paid(
     db.refresh(invoice)
 
     return invoice
+
+
+# ---------- Dashboard endpoint ----------
+
+@app.get("/dashboard", response_model=DashboardResponse)
+def get_dashboard(mobile: str, db: Session = Depends(get_db)):
+    """
+    Returns per-apartment stats + overall totals for a given user (mobile).
+    """
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found for this mobile.")
+
+    apartments = (
+        db.query(models.Apartment)
+        .filter(models.Apartment.created_by_user_id == user.id)
+        .all()
+    )
+
+    items: List[ApartmentDashboardItemResponse] = []
+    overall_due = 0
+    overall_paid = 0
+
+    for apt in apartments:
+        # units
+        units = (
+            db.query(models.Unit)
+            .filter(models.Unit.apartment_id == apt.id)
+            .all()
+        )
+        total_units = len(units)
+        occupied = sum(1 for u in units if u.status == "occupied")
+        vacant = total_units - occupied
+
+        # invoices (for units in this apartment)
+        invoices = (
+            db.query(models.MaintenanceInvoice)
+            .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
+            .filter(models.Unit.apartment_id == apt.id)
+            .all()
+        )
+
+        total_invoices = len(invoices)
+        due_amount = 0
+        paid_amount = 0
+        for inv in invoices:
+            if inv.status == "paid":
+                paid_amount += inv.amount
+            else:
+                # treat non-paid as due (includes "due", "overdue")
+                due_amount += inv.amount
+
+        overall_due += due_amount
+        overall_paid += paid_amount
+
+        items.append(
+            ApartmentDashboardItemResponse(
+                apartment_id=apt.id,
+                apartment_name=apt.name,
+                total_units=total_units,
+                occupied_units=occupied,
+                vacant_units=vacant,
+                total_invoices=total_invoices,
+                total_due_amount=due_amount,
+                total_paid_amount=paid_amount,
+            )
+        )
+
+    return DashboardResponse(
+        apartments=items,
+        overall_due_amount=overall_due,
+        overall_paid_amount=overall_paid,
+    )

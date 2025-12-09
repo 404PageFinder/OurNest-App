@@ -45,6 +45,9 @@ export default function App() {
   const [invDueDate, setInvDueDate] = useState("");
   const [invMessage, setInvMessage] = useState("");
 
+  // Dashboard
+  const [dashboard, setDashboard] = useState(null);
+
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
 
   // Check backend on load
@@ -114,6 +117,7 @@ export default function App() {
       setStep("apartment");
       setAptMessage("OTP verified! Let’s onboard your apartment.");
       fetchApartments();
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
@@ -132,6 +136,23 @@ export default function App() {
       setCreatedApartments(data.apartments || []);
     } catch {
       setCreatedApartments([]);
+    }
+  };
+
+  const fetchDashboard = async () => {
+    if (!mobile) return;
+    try {
+      const res = await fetch(
+        `http://localhost:8000/dashboard?mobile=${mobile}`
+      );
+      if (!res.ok) {
+        setDashboard(null);
+        return;
+      }
+      const data = await res.json();
+      setDashboard(data);
+    } catch {
+      setDashboard(null);
     }
   };
 
@@ -165,6 +186,7 @@ export default function App() {
       setAptCity("");
       setAptUnits("");
       fetchApartments();
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
@@ -233,6 +255,7 @@ export default function App() {
       setUnitBhk("2BHK");
       setUnitStatus("vacant");
       fetchUnits(selectedApartmentId);
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
@@ -307,10 +330,10 @@ export default function App() {
       setOccRole("tenant");
       fetchOccupants(selectedUnitId);
 
-      // refresh units too (status might change to occupied)
       if (selectedApartmentId) {
         fetchUnits(selectedApartmentId);
       }
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
@@ -371,6 +394,7 @@ export default function App() {
       setInvAmount("");
       setInvDueDate("");
       fetchInvoices(selectedUnitId);
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
@@ -403,9 +427,17 @@ export default function App() {
       if (selectedUnitId) {
         fetchInvoices(selectedUnitId);
       }
+      fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
+  };
+
+  const renderPaidPercent = (item) => {
+    const total = item.total_due_amount + item.total_paid_amount;
+    if (total === 0) return "0%";
+    const pct = Math.round((item.total_paid_amount * 100) / total);
+    return `${pct}%`;
   };
 
   return (
@@ -456,6 +488,50 @@ export default function App() {
             <p className="welcome-text">
               Welcome, +91 {mobile}. Manage apartments, units, occupants and maintenance.
             </p>
+
+            {/* Dashboard */}
+            {dashboard && (
+              <div className="section">
+                <h3 className="section-title">Dashboard</h3>
+                <div className="dashboard-row">
+                  <div className="dash-card">
+                    <div className="dash-label">Total Due</div>
+                    <div className="dash-value">
+                      ₹{dashboard.overall_due_amount || 0}
+                    </div>
+                  </div>
+                  <div className="dash-card">
+                    <div className="dash-label">Total Paid</div>
+                    <div className="dash-value">
+                      ₹{dashboard.overall_paid_amount || 0}
+                    </div>
+                  </div>
+                </div>
+
+                {dashboard.apartments.length > 0 && (
+                  <ul className="dashboard-apts">
+                    {dashboard.apartments.map((apt) => (
+                      <li key={apt.apartment_id} className="dashboard-apt-item">
+                        <div className="dash-apt-header">
+                          <strong>{apt.apartment_name}</strong>
+                        </div>
+                        <div className="dash-apt-row">
+                          <span>
+                            Units: {apt.total_units} | Occ: {apt.occupied_units} | Vac:{" "}
+                            {apt.vacant_units}
+                          </span>
+                        </div>
+                        <div className="dash-apt-row">
+                          <span>Due: ₹{apt.total_due_amount}</span>
+                          <span>Paid: ₹{apt.total_paid_amount}</span>
+                          <span>Paid %: {renderPaidPercent(apt)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {/* Apartment creation */}
             <div className="section">

@@ -382,3 +382,55 @@ button:disabled {
 .btn-small:hover {
   opacity: 0.9;
 }
+
+.dashboard-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.dash-card {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.dash-label {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.dash-value {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.dashboard-apts {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  margin-top: 6px;
+}
+
+.dashboard-apt-item {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.dash-apt-header {
+  margin-bottom: 2px;
+}
+
+.dash-apt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #4b5563;
+}
