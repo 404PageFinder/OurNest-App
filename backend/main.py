@@ -366,9 +366,31 @@ class DashboardResponse(BaseModel):
 
 # ---------- Health Check ----------
 
+# ========== ROOT & HEALTH ENDPOINTS ==========
+
+@app.get("/")
+def root():
+    """Root endpoint - shows API is running"""
+    return {
+        "message": "OurNest API is running!",
+        "version": "1.0.0",
+        "status": "ok",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs", 
+            "auth": "/auth/send-otp",
+            "dashboard": "/dashboard"
+        }
+    }
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "version": "2.0.0"}
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "database": "connected"
+    }
 
 # ---------- Auth Endpoints ----------
 
