@@ -42,12 +42,20 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://ournest-app.vercel.app",     # Your Vercel URL
-        "https://*.vercel.app"                # Allow all Vercel preview URLs
+        "https://ournest-app.vercel.app",
+        "https://*.vercel.app",
     ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=True,  # ← THIS IS CRITICAL!
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Add compression for responses > 1KB
