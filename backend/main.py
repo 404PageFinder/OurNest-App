@@ -42,8 +42,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://your-app.vercel.app",  # Add this
-        "https://*.vercel.app"           # Allow all Vercel preview URLs
+        "https://ournest-app.vercel.app",     # Your Vercel URL
+        "https://*.vercel.app"                # Allow all Vercel preview URLs
     ],
     allow_credentials=True,
     allow_methods=["*"],
