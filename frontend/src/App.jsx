@@ -8,7 +8,7 @@ export default function App() {
   const [mobile, setMobile] = useState("");
   const [requestId, setRequestId] = useState(null);
   const [otp, setOtp] = useState("");
-  const [accessToken, setAccessToken] = useState(""); // ← ADD THIS
+  const [accessToken, setAccessToken] = useState("");
   const [step, setStep] = useState("mobile");
   const [error, setError] = useState("");
   const [backendStatus, setBackendStatus] = useState("checking...");
@@ -55,7 +55,7 @@ export default function App() {
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
 
-  // ← ADD: Helper to get auth headers
+  // Helper to get auth headers with JWT token
   const getAuthHeaders = () => {
     const headers = {
       "Content-Type": "application/json",
@@ -87,46 +87,46 @@ export default function App() {
   }, []);
 
   const sendOtp = async () => {
-  if (!isValidMobile) {
-    setError("Invalid mobile number");
-    return;
-  }
-  setError("");
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mobile }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      setError(data.detail || "Failed to send OTP");
+    if (!isValidMobile) {
+      setError("Invalid mobile number");
       return;
     }
+    setError("");
 
-    // Auto-log OTP in console for testing
-    if (data.dev_mode && data.otp) {
-      console.clear();
-      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
-      console.log("%c🔐 DEV MODE - OTP FOR TESTING", "color: #2196F3; font-size: 16px; font-weight: bold;");
-      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
-      console.log(`%cMobile: ${mobile}`, "color: #666; font-size: 14px;");
-      console.log(`%cOTP: ${data.otp}`, "color: #FF5722; font-size: 20px; font-weight: bold;");
-      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
-      
-      // Optional: Auto-fill OTP
-      setOtp(data.otp);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mobile }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail || "Failed to send OTP");
+        return;
+      }
+
+      // Log OTP to console in dev mode with nice formatting
+      if (data.dev_mode && data.otp) {
+        console.clear();
+        console.log("%c=================================", "color: #4CAF50; font-weight: bold; font-size: 14px;");
+        console.log("%c🔐 DEV MODE - OTP FOR TESTING", "color: #2196F3; font-size: 18px; font-weight: bold;");
+        console.log("%c=================================", "color: #4CAF50; font-weight: bold; font-size: 14px;");
+        console.log(`%cMobile: ${mobile}`, "color: #666; font-size: 14px;");
+        console.log(`%cOTP: ${data.otp}`, "color: #FF5722; font-size: 24px; font-weight: bold;");
+        console.log("%c=================================", "color: #4CAF50; font-weight: bold; font-size: 14px;");
+        
+        // Auto-fill OTP for easier testing
+        setOtp(data.otp);
+      }
+
+      setRequestId(data.request_id);
+      setStep("otp");
+    } catch {
+      setError("Could not reach server.");
     }
-
-    setRequestId(data.request_id);
-    setStep("otp");
-  } catch {
-    setError("Could not reach server.");
-  }
-};
+  };
 
   const verifyOtp = async () => {
     setError("");
@@ -144,18 +144,21 @@ export default function App() {
         return;
       }
 
-      // ← SAVE THE TOKEN!
+      // CRITICAL: Save the JWT token!
       setAccessToken(data.access_token);
+      
+      console.log("✅ Login successful! Token saved.");
+      
       setStep("apartment");
       setAptMessage("OTP verified! Let's onboard your apartment.");
       
-      // Wait for token to be set, then fetch
+      // Wait a moment for state to update, then fetch
       setTimeout(() => {
         fetchApartments(data.access_token);
         fetchDashboard(data.access_token);
       }, 100);
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -167,12 +170,14 @@ export default function App() {
         },
       });
       if (!res.ok) {
+        console.error("Failed to fetch apartments:", res.status);
         setCreatedApartments([]);
         return;
       }
       const data = await res.json();
       setCreatedApartments(data.apartments || []);
-    } catch {
+    } catch (err) {
+      console.error("Error fetching apartments:", err);
       setCreatedApartments([]);
     }
   };
@@ -186,12 +191,14 @@ export default function App() {
         },
       });
       if (!res.ok) {
+        console.error("Failed to fetch dashboard:", res.status);
         setDashboard(null);
         return;
       }
       const data = await res.json();
       setDashboard(data);
-    } catch {
+    } catch (err) {
+      console.error("Error fetching dashboard:", err);
       setDashboard(null);
     }
   };
@@ -203,7 +210,6 @@ export default function App() {
     const totalUnitsNum = parseInt(aptUnits, 10);
 
     try {
-      // ← USE TOKEN IN HEADERS!
       const res = await fetch(`${API_BASE_URL}/apartments`, {
         method: "POST",
         headers: getAuthHeaders(),
@@ -228,7 +234,7 @@ export default function App() {
       fetchApartments();
       fetchDashboard();
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -299,7 +305,7 @@ export default function App() {
       fetchUnits(selectedApartmentId);
       fetchDashboard();
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -379,7 +385,7 @@ export default function App() {
       }
       fetchDashboard();
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -443,7 +449,7 @@ export default function App() {
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -469,7 +475,7 @@ export default function App() {
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
-      setError("Could not reach server. Is backend running?");
+      setError("Could not reach server.");
     }
   };
 
@@ -508,6 +514,9 @@ export default function App() {
           <div className="card">
             <h2>Verify OTP</h2>
             <p>Enter the 4-digit OTP sent to {mobile}</p>
+            <p style={{fontSize: '12px', color: '#666', marginTop: '8px'}}>
+              💡 Check browser console (F12) for OTP in dev mode
+            </p>
             <input
               type="text"
               value={otp}
