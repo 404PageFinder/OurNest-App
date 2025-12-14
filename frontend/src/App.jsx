@@ -8,7 +8,8 @@ export default function App() {
   const [mobile, setMobile] = useState("");
   const [requestId, setRequestId] = useState(null);
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState("mobile"); // "mobile" | "otp" | "apartment"
+  const [accessToken, setAccessToken] = useState(""); // ← ADD THIS
+  const [step, setStep] = useState("mobile");
   const [error, setError] = useState("");
   const [backendStatus, setBackendStatus] = useState("checking...");
 
@@ -47,12 +48,23 @@ export default function App() {
   const [invAmount, setInvAmount] = useState("");
   const [invDueDate, setInvDueDate] = useState("");
   const [invMessage, setInvMessage] = useState("");
-  const [invFilterMonth, setInvFilterMonth] = useState(""); // YYYY-MM
+  const [invFilterMonth, setInvFilterMonth] = useState("");
 
   // Dashboard
   const [dashboard, setDashboard] = useState(null);
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
+
+  // ← ADD: Helper to get auth headers
+  const getAuthHeaders = () => {
+    const headers = {
+      "Content-Type": "application/json",
+    };
+    if (accessToken) {
+      headers["Authorization"] = `Bearer ${accessToken}`;
+    }
+    return headers;
+  };
 
   // Check backend on load
   useEffect(() => {
@@ -118,20 +130,28 @@ export default function App() {
         return;
       }
 
+      // ← SAVE THE TOKEN!
+      setAccessToken(data.access_token);
       setStep("apartment");
       setAptMessage("OTP verified! Let's onboard your apartment.");
-      fetchApartments();
-      fetchDashboard();
+      
+      // Wait for token to be set, then fetch
+      setTimeout(() => {
+        fetchApartments(data.access_token);
+        fetchDashboard(data.access_token);
+      }, 100);
     } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
 
-  const fetchApartments = async () => {
+  const fetchApartments = async (token = accessToken) => {
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/apartments?mobile=${mobile}`
-      );
+      const res = await fetch(`${API_BASE_URL}/apartments`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+        },
+      });
       if (!res.ok) {
         setCreatedApartments([]);
         return;
@@ -143,12 +163,14 @@ export default function App() {
     }
   };
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = async (token = accessToken) => {
     if (!mobile) return;
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/dashboard?mobile=${mobile}`
-      );
+      const res = await fetch(`${API_BASE_URL}/dashboard`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+        },
+      });
       if (!res.ok) {
         setDashboard(null);
         return;
@@ -167,12 +189,11 @@ export default function App() {
     const totalUnitsNum = parseInt(aptUnits, 10);
 
     try {
-      // FIXED: Mobile in body, not query param
+      // ← USE TOKEN IN HEADERS!
       const res = await fetch(`${API_BASE_URL}/apartments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          mobile,  // ← Mobile in body!
           name: aptName,
           city: aptCity,
           total_units: totalUnitsNum,
@@ -212,7 +233,10 @@ export default function App() {
   const fetchUnits = async (apartmentId) => {
     try {
       const res = await fetch(
-        `${API_BASE_URL}/apartments/${apartmentId}/units?mobile=${mobile}`
+        `${API_BASE_URL}/apartments/${apartmentId}/units`,
+        {
+          headers: getAuthHeaders(),
+        }
       );
       if (!res.ok) {
         setUnits([]);
@@ -234,14 +258,12 @@ export default function App() {
     setUnitMessage("");
 
     try {
-      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/apartments/${selectedApartmentId}/units`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
-            mobile,  // ← Mobile in body!
             name: unitName,
             bhk_type: unitBhk,
             status: unitStatus,
@@ -285,7 +307,10 @@ export default function App() {
   const fetchOccupants = async (unitId) => {
     try {
       const res = await fetch(
-        `${API_BASE_URL}/units/${unitId}/occupants?mobile=${mobile}`
+        `${API_BASE_URL}/units/${unitId}/occupants`,
+        {
+          headers: getAuthHeaders(),
+        }
       );
       if (!res.ok) {
         setOccupants([]);
@@ -307,14 +332,12 @@ export default function App() {
     setOccMessage("");
 
     try {
-      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/units/${selectedUnitId}/occupants`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
-            mobile,  // ← Mobile in body!
             name: occName,
             phone: occPhone,
             role: occRole,
@@ -348,11 +371,13 @@ export default function App() {
 
   const fetchInvoices = async (unitId, month) => {
     try {
-      let url = `${API_BASE_URL}/units/${unitId}/invoices?mobile=${mobile}`;
+      let url = `${API_BASE_URL}/units/${unitId}/invoices`;
       if (month) {
-        url += `&month=${month}`;
+        url += `?month=${month}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) {
         setInvoices([]);
         return;
@@ -375,14 +400,12 @@ export default function App() {
     const amountNum = parseInt(invAmount, 10);
 
     try {
-      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/units/${selectedUnitId}/invoices`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
-            mobile,  // ← Mobile in body!
             period_label: invPeriod,
             amount: amountNum,
             due_date: invDueDate,
@@ -417,8 +440,7 @@ export default function App() {
         `${API_BASE_URL}/invoices/${invoiceId}/mark-paid`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mobile }),
+          headers: getAuthHeaders(),
         }
       );
 
@@ -439,38 +461,27 @@ export default function App() {
 
   // UI render starts here
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>🏘️ OurNest</h1>
-        <p className="tagline">Apartment Management System</p>
-        <div className="backend-status">
-          Backend:{" "}
-          <span className={backendStatus === "online" ? "online" : "offline"}>
-            {backendStatus}
-          </span>
-        </div>
-      </header>
-
-      <main className="app-main">
+    <div className="screen">
+      <div className="app-container">
         {/* STEP: MOBILE */}
         {step === "mobile" && (
           <div className="card">
-            <h2>Login with OTP</h2>
-            <p>Enter your mobile number to receive an OTP</p>
-            <div className="form-group">
-              <label>Mobile Number</label>
-              <input
-                type="tel"
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value)}
-                placeholder="10-digit mobile"
-                maxLength={10}
-              />
+            <h2>🏘️ OurNest</h2>
+            <p>Apartment Management System</p>
+            <div className="backend-status">
+              Backend: <span className={backendStatus === "online" ? "status-ok" : "status-bad"}>{backendStatus}</span>
             </div>
+            <p className="welcome-text">Enter your mobile number to receive an OTP</p>
+            <input
+              type="tel"
+              value={mobile}
+              onChange={(e) => setMobile(e.target.value)}
+              placeholder="10-digit mobile"
+              maxLength={10}
+            />
             <button
               onClick={sendOtp}
               disabled={!isValidMobile}
-              className="btn-primary"
             >
               Send OTP
             </button>
@@ -483,124 +494,119 @@ export default function App() {
           <div className="card">
             <h2>Verify OTP</h2>
             <p>Enter the 4-digit OTP sent to {mobile}</p>
-            <div className="form-group">
-              <label>OTP</label>
-              <input
-                type="text"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                placeholder="4-digit OTP"
-                maxLength={4}
-              />
-            </div>
-            <div className="button-group">
-              <button onClick={verifyOtp} className="btn-primary">
-                Verify OTP
-              </button>
-              <button
-                onClick={() => {
-                  setStep("mobile");
-                  setOtp("");
-                  setError("");
-                }}
-                className="btn-secondary"
-              >
-                Back
-              </button>
-            </div>
+            <input
+              type="text"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              placeholder="4-digit OTP"
+              maxLength={4}
+            />
+            <button onClick={verifyOtp}>
+              Verify OTP
+            </button>
+            <button
+              onClick={() => {
+                setStep("mobile");
+                setOtp("");
+                setError("");
+              }}
+              className="btn-secondary"
+            >
+              Back
+            </button>
             {error && <div className="error">{error}</div>}
           </div>
         )}
 
-        {/* STEP: APARTMENT */}
+        {/* STEP: DASHBOARD */}
         {step === "apartment" && (
-          <>
-            {/* Apartment Form */}
-            <section className="card">
-              <h2>Create Apartment</h2>
-              {aptMessage && <div className="success">{aptMessage}</div>}
-              {error && <div className="error">{error}</div>}
-              
-              <div className="form-group">
-                <label>Apartment Name</label>
-                <input
-                  type="text"
-                  value={aptName}
-                  onChange={(e) => setAptName(e.target.value)}
-                  placeholder="e.g. Sunrise Towers"
-                />
+          <div className="dashboard-layout">
+            {/* Sidebar */}
+            <div className="sidebar">
+              <div className="sidebar-header">
+                <h2>🏘️ OurNest</h2>
               </div>
-              
-              <div className="form-group">
-                <label>City</label>
-                <input
-                  type="text"
-                  value={aptCity}
-                  onChange={(e) => setAptCity(e.target.value)}
-                  placeholder="e.g. Bangalore"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label>Total Units</label>
-                <input
-                  type="number"
-                  value={aptUnits}
-                  onChange={(e) => setAptUnits(e.target.value)}
-                  placeholder="e.g. 50"
-                  min="1"
-                />
-              </div>
-              
-              <button onClick={createApartment} className="btn-primary">
-                Create Apartment
-              </button>
-            </section>
 
-            {/* Apartments List */}
-            <section className="card">
-              <h2>Your Apartments</h2>
-              {createdApartments.length === 0 ? (
-                <p className="empty-state">No apartments yet. Create one above!</p>
-              ) : (
-                <div className="list">
-                  {createdApartments.map((apt) => (
-                    <div
-                      key={apt.id}
-                      className={`list-item ${
-                        selectedApartmentId === apt.id ? "selected" : ""
-                      }`}
-                      onClick={() => handleSelectApartment(apt)}
-                    >
-                      <div className="list-item-title">{apt.name}</div>
-                      <div className="list-item-meta">
-                        {apt.city} • {apt.total_units} units
-                      </div>
-                    </div>
-                  ))}
+              {/* Dashboard Summary */}
+              {dashboard && (
+                <div className="dashboard-summary">
+                  <h3>Overview</h3>
+                  <div className="summary-card">
+                    <div className="summary-label">Total Due</div>
+                    <div className="summary-value">₹{dashboard.overall_due_amount}</div>
+                  </div>
+                  <div className="summary-card">
+                    <div className="summary-label">Total Paid</div>
+                    <div className="summary-value success">₹{dashboard.overall_paid_amount}</div>
+                  </div>
                 </div>
               )}
-            </section>
 
-            {/* Units Section */}
-            {selectedApartmentId && (
-              <>
-                <section className="card">
+              {/* Apartments List */}
+              <div>
+                <h3>Your Apartments</h3>
+                {createdApartments.length === 0 ? (
+                  <div className="empty-state-small">No apartments yet</div>
+                ) : (
+                  <ul className="apt-list">
+                    {createdApartments.map((apt) => (
+                      <li
+                        key={apt.id}
+                        className={`apt-item ${selectedApartmentId === apt.id ? "selected" : ""}`}
+                        onClick={() => handleSelectApartment(apt)}
+                      >
+                        <strong>{apt.name}</strong>
+                        <div className="apt-meta">{apt.city} • {apt.total_units} units</div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            {/* Main Content */}
+            <div className="main-content">
+              {/* Create Apartment */}
+              <div className="section">
+                <h2>Create New Apartment</h2>
+                {aptMessage && <div className="success">{aptMessage}</div>}
+                {error && <div className="error">{error}</div>}
+                <div className="form-horizontal">
+                  <input
+                    type="text"
+                    value={aptName}
+                    onChange={(e) => setAptName(e.target.value)}
+                    placeholder="Apartment name"
+                  />
+                  <input
+                    type="text"
+                    value={aptCity}
+                    onChange={(e) => setAptCity(e.target.value)}
+                    placeholder="City"
+                  />
+                  <input
+                    type="number"
+                    value={aptUnits}
+                    onChange={(e) => setAptUnits(e.target.value)}
+                    placeholder="Total units"
+                    min="1"
+                  />
+                  <button onClick={createApartment}>Create Apartment</button>
+                </div>
+              </div>
+
+              {/* Units Section */}
+              {selectedApartmentId && (
+                <div className="section">
                   <h2>Units in {selectedApartmentName}</h2>
                   {unitMessage && <div className="success">{unitMessage}</div>}
-                  
-                  <div className="form-group">
-                    <label>Unit Name</label>
+                  <div className="form-horizontal">
                     <input
                       type="text"
                       value={unitName}
                       onChange={(e) => setUnitName(e.target.value)}
-                      placeholder="e.g. A-101"
+                      placeholder="Unit name (e.g. A-101)"
                     />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>BHK Type</label>
                     <select
                       value={unitBhk}
                       onChange={(e) => setUnitBhk(e.target.value)}
@@ -609,12 +615,7 @@ export default function App() {
                       <option value="2BHK">2BHK</option>
                       <option value="3BHK">3BHK</option>
                       <option value="4BHK">4BHK</option>
-                      <option value="5BHK">5BHK</option>
                     </select>
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Status</label>
                     <select
                       value={unitStatus}
                       onChange={(e) => setUnitStatus(e.target.value)}
@@ -622,259 +623,167 @@ export default function App() {
                       <option value="vacant">Vacant</option>
                       <option value="occupied">Occupied</option>
                     </select>
+                    <button onClick={createUnit}>Add Unit</button>
                   </div>
-                  
-                  <button onClick={createUnit} className="btn-primary">
-                    Add Unit
-                  </button>
-                </section>
 
-                <section className="card">
-                  <h3>Units List</h3>
-                  {units.length === 0 ? (
-                    <p className="empty-state">No units yet. Add one above!</p>
-                  ) : (
-                    <div className="list">
+                  {units.length > 0 && (
+                    <div className="units-grid">
                       {units.map((u) => (
                         <div
                           key={u.id}
-                          className={`list-item ${
-                            selectedUnitId === u.id ? "selected" : ""
-                          }`}
+                          className={`unit-card ${selectedUnitId === u.id ? "selected" : ""}`}
                           onClick={() => handleSelectUnit(u)}
                         >
-                          <div className="list-item-title">{u.name}</div>
-                          <div className="list-item-meta">
-                            {u.bhk_type} • {u.status}
-                          </div>
+                          <div className="unit-name">{u.name}</div>
+                          <div className="unit-bhk">{u.bhk_type}</div>
+                          <span className={`badge badge-${u.status}`}>{u.status}</span>
                         </div>
                       ))}
                     </div>
                   )}
-                </section>
-              </>
-            )}
+                </div>
+              )}
 
-            {/* Occupants Section */}
-            {selectedUnitId && (
-              <>
-                <section className="card">
-                  <h2>Occupants for {selectedUnitLabel}</h2>
+              {/* Occupants Section */}
+              {selectedUnitId && (
+                <div className="section">
+                  <h2>Occupants - {selectedUnitLabel}</h2>
                   {occMessage && <div className="success">{occMessage}</div>}
-                  
-                  <div className="form-group">
-                    <label>Name</label>
+                  <div className="form-horizontal">
                     <input
                       type="text"
                       value={occName}
                       onChange={(e) => setOccName(e.target.value)}
-                      placeholder="e.g. John Doe"
+                      placeholder="Name"
                     />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Phone</label>
                     <input
                       type="tel"
                       value={occPhone}
                       onChange={(e) => setOccPhone(e.target.value)}
-                      placeholder="e.g. 9876543210"
+                      placeholder="Phone"
                     />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Role</label>
                     <select
                       value={occRole}
                       onChange={(e) => setOccRole(e.target.value)}
                     >
                       <option value="owner">Owner</option>
                       <option value="tenant">Tenant</option>
-                      <option value="family">Family</option>
                     </select>
+                    <button onClick={createOccupant}>Add Occupant</button>
                   </div>
-                  
-                  <button onClick={createOccupant} className="btn-primary">
-                    Add Occupant
-                  </button>
-                </section>
 
-                <section className="card">
-                  <h3>Occupants List</h3>
-                  {occupants.length === 0 ? (
-                    <p className="empty-state">No occupants yet. Add one above!</p>
-                  ) : (
-                    <div className="list">
+                  {occupants.length > 0 && (
+                    <ul className="occupant-list">
                       {occupants.map((occ) => (
-                        <div key={occ.id} className="list-item">
-                          <div className="list-item-title">{occ.name}</div>
-                          <div className="list-item-meta">
-                            {occ.phone} • {occ.role} • {occ.is_active ? "Active" : "Inactive"}
+                        <li key={occ.id} className="occupant-item">
+                          <div>
+                            <strong>{occ.name}</strong>
+                            <span className="role-badge">{occ.role}</span>
+                            <div className="occupant-phone">{occ.phone}</div>
                           </div>
-                        </div>
+                          <span className={`badge badge-${occ.is_active ? 'active' : 'inactive'}`}>
+                            {occ.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   )}
-                </section>
+                </div>
+              )}
 
-                {/* Invoices Section */}
-                <section className="card">
-                  <h2>Invoices for {selectedUnitLabel}</h2>
+              {/* Invoices Section */}
+              {selectedUnitId && (
+                <div className="section">
+                  <h2>Maintenance Invoices - {selectedUnitLabel}</h2>
                   {invMessage && <div className="success">{invMessage}</div>}
-                  
-                  <div className="form-group">
-                    <label>Period Label</label>
+                  <div className="form-horizontal">
                     <input
                       type="text"
                       value={invPeriod}
                       onChange={(e) => setInvPeriod(e.target.value)}
-                      placeholder="e.g. January 2024"
+                      placeholder="Period (e.g. Jan 2024)"
                     />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Amount (₹)</label>
                     <input
                       type="number"
                       value={invAmount}
                       onChange={(e) => setInvAmount(e.target.value)}
-                      placeholder="e.g. 5000"
+                      placeholder="Amount (₹)"
                       min="0"
                     />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>Due Date</label>
                     <input
                       type="date"
                       value={invDueDate}
                       onChange={(e) => setInvDueDate(e.target.value)}
                     />
+                    <button onClick={createInvoice}>Create Invoice</button>
                   </div>
-                  
-                  <button onClick={createInvoice} className="btn-primary">
-                    Create Invoice
-                  </button>
-                </section>
 
-                <section className="card">
-                  <h3>Invoices List</h3>
-                  
-                  <div className="form-group">
-                    <label>Filter by Month (YYYY-MM)</label>
-                    <input
-                      type="text"
-                      value={invFilterMonth}
-                      onChange={(e) => {
-                        setInvFilterMonth(e.target.value);
-                        if (selectedUnitId) {
-                          fetchInvoices(selectedUnitId, e.target.value || undefined);
-                        }
-                      }}
-                      placeholder="e.g. 2024-01"
-                    />
-                  </div>
-                  
-                  {invoices.length === 0 ? (
-                    <p className="empty-state">No invoices yet. Create one above!</p>
-                  ) : (
-                    <div className="list">
-                      {invoices.map((inv) => (
-                        <div key={inv.id} className="list-item invoice-item">
-                          <div className="list-item-title">
-                            {inv.period_label}
-                          </div>
-                          <div className="list-item-meta">
-                            ₹{inv.amount} • Due: {inv.due_date} • 
-                            <span className={`status-${inv.status}`}>
-                              {inv.status}
-                            </span>
-                          </div>
-                          {inv.status !== "paid" && (
-                            <button
-                              onClick={() => markPaid(inv.id)}
-                              className="btn-small"
-                            >
-                              Mark as Paid
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              </>
-            )}
-
-            {/* Dashboard Section */}
-            <section className="card dashboard">
-              <h2>📊 Dashboard</h2>
-              {dashboard ? (
-                <>
-                  <div className="dashboard-summary">
-                    <div className="summary-card">
-                      <div className="summary-title">Total Due</div>
-                      <div className="summary-value due">
-                        ₹{dashboard.overall_due_amount}
+                  {invoices.length > 0 && (
+                    <>
+                      <div className="filter-bar">
+                        <input
+                          className="search-input"
+                          type="text"
+                          value={invFilterMonth}
+                          onChange={(e) => {
+                            setInvFilterMonth(e.target.value);
+                            if (selectedUnitId) {
+                              fetchInvoices(selectedUnitId, e.target.value || undefined);
+                            }
+                          }}
+                          placeholder="Filter by month (YYYY-MM)"
+                        />
                       </div>
-                    </div>
-                    <div className="summary-card">
-                      <div className="summary-title">Total Paid</div>
-                      <div className="summary-value paid">
-                        ₹{dashboard.overall_paid_amount}
-                      </div>
-                    </div>
-                  </div>
 
-                  {dashboard.apartments && dashboard.apartments.length > 0 && (
-                    <div className="apartment-stats">
-                      <h3>Apartment Statistics</h3>
-                      {dashboard.apartments.map((apt) => (
-                        <div key={apt.apartment_id} className="stat-card">
-                          <h4>{apt.apartment_name}</h4>
-                          <div className="stat-grid">
-                            <div className="stat-item">
-                              <span className="stat-label">Total Units:</span>
-                              <span className="stat-value">{apt.total_units}</span>
-                            </div>
-                            <div className="stat-item">
-                              <span className="stat-label">Occupied:</span>
-                              <span className="stat-value">{apt.occupied_units}</span>
-                            </div>
-                            <div className="stat-item">
-                              <span className="stat-label">Vacant:</span>
-                              <span className="stat-value">{apt.vacant_units}</span>
-                            </div>
-                            <div className="stat-item">
-                              <span className="stat-label">Invoices:</span>
-                              <span className="stat-value">{apt.total_invoices}</span>
-                            </div>
-                            <div className="stat-item">
-                              <span className="stat-label">Due Amount:</span>
-                              <span className="stat-value due">₹{apt.total_due_amount}</span>
-                            </div>
-                            <div className="stat-item">
-                              <span className="stat-label">Paid Amount:</span>
-                              <span className="stat-value paid">₹{apt.total_paid_amount}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                      <div className="table-container">
+                        <table className="invoice-table">
+                          <thead>
+                            <tr>
+                              <th>Period</th>
+                              <th>Amount</th>
+                              <th>Due Date</th>
+                              <th>Status</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invoices.map((inv) => (
+                              <tr key={inv.id}>
+                                <td>{inv.period_label}</td>
+                                <td>₹{inv.amount}</td>
+                                <td>{inv.due_date}</td>
+                                <td>
+                                  <span className={`badge badge-${inv.status}`}>
+                                    {inv.status}
+                                  </span>
+                                </td>
+                                <td>
+                                  {inv.status !== "paid" && (
+                                    <button
+                                      onClick={() => markPaid(inv.id)}
+                                      className="btn-small"
+                                    >
+                                      Mark Paid
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="invoice-summary">
+                        Total Due: <strong>₹{invoices.filter(i => i.status === 'due').reduce((sum, i) => sum + i.amount, 0)}</strong>
+                      </div>
+                    </>
                   )}
-                </>
-              ) : (
-                <p className="empty-state">Loading dashboard...</p>
+                </div>
               )}
-            </section>
-          </>
+            </div>
+          </div>
         )}
-      </main>
-
-      <footer className="app-footer">
-        <p>OurNest • Apartment Management Made Easy</p>
-        {mobile && <p className="user-info">Logged in as: {mobile}</p>}
-      </footer>
+      </div>
     </div>
   );
 }
