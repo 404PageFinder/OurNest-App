@@ -87,32 +87,46 @@ export default function App() {
   }, []);
 
   const sendOtp = async () => {
-    if (!isValidMobile) {
-      setError("Invalid mobile number");
+  if (!isValidMobile) {
+    setError("Invalid mobile number");
+    return;
+  }
+  setError("");
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mobile }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.detail || "Failed to send OTP");
       return;
     }
-    setError("");
 
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/send-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.detail || "Failed to send OTP");
-        return;
-      }
-
-      setRequestId(data.request_id);
-      setStep("otp");
-    } catch {
-      setError("Could not reach server. Is backend running?");
+    // Auto-log OTP in console for testing
+    if (data.dev_mode && data.otp) {
+      console.clear();
+      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
+      console.log("%c🔐 DEV MODE - OTP FOR TESTING", "color: #2196F3; font-size: 16px; font-weight: bold;");
+      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
+      console.log(`%cMobile: ${mobile}`, "color: #666; font-size: 14px;");
+      console.log(`%cOTP: ${data.otp}`, "color: #FF5722; font-size: 20px; font-weight: bold;");
+      console.log("%c=================================", "color: #4CAF50; font-weight: bold;");
+      
+      // Optional: Auto-fill OTP
+      setOtp(data.otp);
     }
-  };
+
+    setRequestId(data.request_id);
+    setStep("otp");
+  } catch {
+    setError("Could not reach server.");
+  }
+};
 
   const verifyOtp = async () => {
     setError("");

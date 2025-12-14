@@ -28,6 +28,8 @@ OTP_TTL_MINUTES = 5
 MAX_ATTEMPTS = 5
 MOBILE_REGEX = r"^[6-9]\d{9}$"
 
+IS_DEV_MODE = os.getenv("ENVIRONMENT", "development") == "development"
+
 # ---------- FastAPI App Setup ----------
 
 app = FastAPI(
@@ -137,6 +139,30 @@ class SendOtpResponse(BaseModel):
     request_id: str
     message: str
     expires_in_minutes: int
+    otp: Optional[str] = None
+    dev_mode: Optional[bool] = None
+
+# Update send_otp endpoint
+@app.post("/auth/send-otp", response_model=SendOtpResponse)
+def send_otp(data: SendOtpRequest, db: Session = Depends(get_db)):
+    request_id = secrets.token_urlsafe(32)
+    otp = f"{secrets.randbelow(10000):04d}"
+    
+    # ... existing OTP storage code ...
+    
+    print(f"[OTP] Mobile: {data.mobile}, OTP: {otp}")
+    
+    response_data = {
+        "request_id": request_id,
+        "message": f"OTP sent to {data.mobile}",
+        "expires_in_minutes": OTP_TTL_MINUTES
+    }
+    
+    if IS_DEV_MODE:
+        response_data["otp"] = otp
+        response_data["dev_mode"] = True
+    
+    return response_data
 
 class VerifyOtpRequest(BaseModel):
     request_id: str
