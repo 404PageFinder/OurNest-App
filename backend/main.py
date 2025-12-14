@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
+import os
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -12,6 +13,10 @@ from sqlalchemy.orm import Session
 
 from db import Base, engine, get_db
 import models
+
+# ---------- Configuration ----------
+
+IS_DEV_MODE = os.getenv("ENVIRONMENT", "development") == "development"
 
 # ---------- OTP in-memory store ----------
 
@@ -52,6 +57,8 @@ class SendOtpRequest(BaseModel):
 class SendOtpResponse(BaseModel):
     request_id: str
     message: str
+    otp: Optional[str] = None  # Only in dev mode
+    dev_mode: Optional[bool] = None  # Only in dev mode
 
 
 class VerifyOtpRequest(BaseModel):
@@ -406,10 +413,17 @@ def send_otp(data: SendOtpRequest):
 
     print(f"[DEV] OTP for {data.mobile}: {otp} (request_id={request_id})")
 
-    return SendOtpResponse(
-        request_id=request_id,
-        message="OTP sent successfully.",
-    )
+    response_data = {
+        "request_id": request_id,
+        "message": "OTP sent successfully.",
+    }
+    
+    # Include OTP in response for development/demo
+    if IS_DEV_MODE:
+        response_data["otp"] = otp
+        response_data["dev_mode"] = True
+    
+    return SendOtpResponse(**response_data)
 
 
 @app.post("/auth/verify-otp", response_model=VerifyOtpResponse)
