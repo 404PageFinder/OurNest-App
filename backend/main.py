@@ -47,16 +47,14 @@ app.add_middleware(
     ],
     allow_credentials=True,  # ← THIS IS CRITICAL!
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=[
-        "Content-Type",
-        "Authorization",
-        "Accept",
-        "Origin",
-        "X-Requested-With",
-    ],
+    allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
 )
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 # Add compression for responses > 1KB
 app.add_middleware(GZipMiddleware, minimum_size=1000)
