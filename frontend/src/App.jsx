@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 
-// API Configuration - Uses environment variable in production
+// Use environment variable for API URL, fallback to localhost
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function App() {
@@ -119,7 +119,7 @@ export default function App() {
       }
 
       setStep("apartment");
-      setAptMessage("OTP verified! Let’s onboard your apartment.");
+      setAptMessage("OTP verified! Let's onboard your apartment.");
       fetchApartments();
       fetchDashboard();
     } catch {
@@ -167,11 +167,12 @@ export default function App() {
     const totalUnitsNum = parseInt(aptUnits, 10);
 
     try {
+      // FIXED: Mobile in body, not query param
       const res = await fetch(`${API_BASE_URL}/apartments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mobile,
+          mobile,  // ← Mobile in body!
           name: aptName,
           city: aptCity,
           total_units: totalUnitsNum,
@@ -233,13 +234,14 @@ export default function App() {
     setUnitMessage("");
 
     try {
+      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/apartments/${selectedApartmentId}/units`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            mobile,
+            mobile,  // ← Mobile in body!
             name: unitName,
             bhk_type: unitBhk,
             status: unitStatus,
@@ -305,13 +307,14 @@ export default function App() {
     setOccMessage("");
 
     try {
+      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/units/${selectedUnitId}/occupants`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            mobile,
+            mobile,  // ← Mobile in body!
             name: occName,
             phone: occPhone,
             role: occRole,
@@ -372,13 +375,14 @@ export default function App() {
     const amountNum = parseInt(invAmount, 10);
 
     try {
+      // FIXED: Mobile in body, not query param
       const res = await fetch(
         `${API_BASE_URL}/units/${selectedUnitId}/invoices`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            mobile,
+            mobile,  // ← Mobile in body!
             period_label: invPeriod,
             amount: amountNum,
             due_date: invDueDate,
@@ -406,10 +410,8 @@ export default function App() {
     }
   };
 
-  const markInvoicePaid = async (invoiceId) => {
+  const markPaid = async (invoiceId) => {
     setError("");
-    setInvMessage("");
-
     try {
       const res = await fetch(
         `${API_BASE_URL}/invoices/${invoiceId}/mark-paid`,
@@ -427,412 +429,452 @@ export default function App() {
         return;
       }
 
-      setInvMessage(
-        `Invoice "${data.period_label}" marked as paid.`
-      );
-      if (selectedUnitId) {
-        fetchInvoices(selectedUnitId, invFilterMonth || undefined);
-      }
+      setInvMessage(`Invoice marked as paid!`);
+      fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
       setError("Could not reach server. Is backend running?");
     }
   };
 
-  const renderPaidPercent = (item) => {
-    const total = item.total_due_amount + item.total_paid_amount;
-    if (total === 0) return "0%";
-    const pct = Math.round((item.total_paid_amount * 100) / total);
-    return `${pct}%`;
-  };
-
-  const handleApplyInvoiceFilter = () => {
-    if (!selectedUnitId) return;
-    fetchInvoices(selectedUnitId, invFilterMonth || undefined);
-  };
-
-  const handleClearInvoiceFilter = () => {
-    if (!selectedUnitId) return;
-    setInvFilterMonth("");
-    fetchInvoices(selectedUnitId);
-  };
-
+  // UI render starts here
   return (
-    <div className="screen">
-      <div className="card">
-        <h2>Get started with OurNest</h2>
-
-        <p className="backend-status">
+    <div className="app">
+      <header className="app-header">
+        <h1>🏘️ OurNest</h1>
+        <p className="tagline">Apartment Management System</p>
+        <div className="backend-status">
           Backend:{" "}
-          <span
-            className={
-              backendStatus === "online" ? "status-ok" : "status-bad"
-            }
-          >
+          <span className={backendStatus === "online" ? "online" : "offline"}>
             {backendStatus}
           </span>
-        </p>
+        </div>
+      </header>
 
+      <main className="app-main">
+        {/* STEP: MOBILE */}
         {step === "mobile" && (
-          <>
-            <input
-              placeholder="Enter mobile number"
-              value={mobile}
-              onChange={(e) => setMobile(e.target.value)}
-            />
-            <button disabled={!isValidMobile} onClick={sendOtp}>
+          <div className="card">
+            <h2>Login with OTP</h2>
+            <p>Enter your mobile number to receive an OTP</p>
+            <div className="form-group">
+              <label>Mobile Number</label>
+              <input
+                type="tel"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value)}
+                placeholder="10-digit mobile"
+                maxLength={10}
+              />
+            </div>
+            <button
+              onClick={sendOtp}
+              disabled={!isValidMobile}
+              className="btn-primary"
+            >
               Send OTP
             </button>
-          </>
+            {error && <div className="error">{error}</div>}
+          </div>
         )}
 
+        {/* STEP: OTP */}
         {step === "otp" && (
-          <>
-            <p>OTP sent to +91 {mobile}</p>
-            <input
-              placeholder="Enter 4-digit OTP"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-            />
-            <button disabled={otp.length !== 4} onClick={verifyOtp}>
-              Verify OTP
-            </button>
-          </>
-        )}
-
-        {step === "apartment" && (
-          <>
-            <p className="welcome-text">
-              Welcome, +91 {mobile}. Manage apartments, units, occupants and maintenance.
-            </p>
-
-            {/* Dashboard */}
-            {dashboard && (
-              <div className="section">
-                <h3 className="section-title">Dashboard</h3>
-                <div className="dashboard-row">
-                  <div className="dash-card">
-                    <div className="dash-label">Total Due</div>
-                    <div className="dash-value">
-                      ₹{dashboard.overall_due_amount || 0}
-                    </div>
-                  </div>
-                  <div className="dash-card">
-                    <div className="dash-label">Total Paid</div>
-                    <div className="dash-value">
-                      ₹{dashboard.overall_paid_amount || 0}
-                    </div>
-                  </div>
-                </div>
-
-                {dashboard.apartments.length > 0 && (
-                  <ul className="dashboard-apts">
-                    {dashboard.apartments.map((apt) => (
-                      <li key={apt.apartment_id} className="dashboard-apt-item">
-                        <div className="dash-apt-header">
-                          <strong>{apt.apartment_name}</strong>
-                        </div>
-                        <div className="dash-apt-row">
-                          <span>
-                            Units: {apt.total_units} | Occ: {apt.occupied_units} | Vac:{" "}
-                            {apt.vacant_units}
-                          </span>
-                        </div>
-                        <div className="dash-apt-row">
-                          <span>Due: ₹{apt.total_due_amount}</span>
-                          <span>Paid: ₹{apt.total_paid_amount}</span>
-                          <span>Paid %: {renderPaidPercent(apt)}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {/* Apartment creation */}
-            <div className="section">
-              <h3 className="section-title">Create Apartment</h3>
+          <div className="card">
+            <h2>Verify OTP</h2>
+            <p>Enter the 4-digit OTP sent to {mobile}</p>
+            <div className="form-group">
+              <label>OTP</label>
               <input
-                placeholder="Apartment name"
-                value={aptName}
-                onChange={(e) => setAptName(e.target.value)}
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                placeholder="4-digit OTP"
+                maxLength={4}
               />
-              <input
-                placeholder="City"
-                value={aptCity}
-                onChange={(e) => setAptCity(e.target.value)}
-              />
-              <input
-                placeholder="Total units (e.g., 40)"
-                type="number"
-                value={aptUnits}
-                onChange={(e) => setAptUnits(e.target.value)}
-              />
+            </div>
+            <div className="button-group">
+              <button onClick={verifyOtp} className="btn-primary">
+                Verify OTP
+              </button>
               <button
-                onClick={createApartment}
-                disabled={!aptName || !aptCity || !aptUnits}
+                onClick={() => {
+                  setStep("mobile");
+                  setOtp("");
+                  setError("");
+                }}
+                className="btn-secondary"
               >
-                Create Apartment
+                Back
               </button>
             </div>
-
-            {/* Apartment list & selection */}
-            {createdApartments.length > 0 && (
-              <div className="section">
-                <h3 className="section-title">Your apartments</h3>
-                <ul className="apt-list">
-                  {createdApartments.map((apt) => (
-                    <li
-                      key={apt.id}
-                      className={
-                        apt.id === selectedApartmentId
-                          ? "apt-item selected"
-                          : "apt-item"
-                      }
-                      onClick={() => handleSelectApartment(apt)}
-                    >
-                      <strong>{apt.name}</strong> – {apt.city} (
-                      {apt.total_units} units)
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Units for selected apartment */}
-            {selectedApartmentId && (
-              <div className="section">
-                <h3 className="section-title">
-                  Units in: {selectedApartmentName}
-                </h3>
-
-                <div className="unit-form">
-                  <input
-                    placeholder="Unit number (e.g., 101)"
-                    value={unitName}
-                    onChange={(e) => setUnitName(e.target.value)}
-                  />
-                  <select
-                    value={unitBhk}
-                    onChange={(e) => setUnitBhk(e.target.value)}
-                  >
-                    <option value="1BHK">1BHK</option>
-                    <option value="2BHK">2BHK</option>
-                    <option value="3BHK">3BHK</option>
-                    <option value="4BHK">4BHK</option>
-                  </select>
-                  <select
-                    value={unitStatus}
-                    onChange={(e) => setUnitStatus(e.target.value)}
-                  >
-                    <option value="vacant">Vacant</option>
-                    <option value="occupied">Occupied</option>
-                  </select>
-                  <button onClick={createUnit} disabled={!unitName}>
-                    Add Unit
-                  </button>
-                </div>
-
-                {units.length > 0 && (
-                  <ul className="unit-list">
-                    {units.map((u) => (
-                      <li
-                        key={u.id}
-                        className={
-                          u.id === selectedUnitId
-                            ? "unit-item unit-selected"
-                            : "unit-item"
-                        }
-                        onClick={() => handleSelectUnit(u)}
-                      >
-                        <span className="unit-name">{u.name}</span>
-                        <span className="unit-bhk">{u.bhk_type}</span>
-                        <span
-                          className={
-                            u.status === "vacant"
-                              ? "unit-status vacant"
-                              : "unit-status occupied"
-                          }
-                        >
-                          {u.status}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {/* Occupants for selected unit */}
-            {selectedUnitId && (
-              <div className="section">
-                <h3 className="section-title">
-                  Occupants – unit: {selectedUnitLabel}
-                </h3>
-
-                <div className="occupant-form">
-                  <input
-                    placeholder="Name"
-                    value={occName}
-                    onChange={(e) => setOccName(e.target.value)}
-                  />
-                  <input
-                    placeholder="Phone"
-                    value={occPhone}
-                    onChange={(e) => setOccPhone(e.target.value)}
-                  />
-                  <select
-                    value={occRole}
-                    onChange={(e) => setOccRole(e.target.value)}
-                  >
-                    <option value="owner">Owner</option>
-                    <option value="tenant">Tenant</option>
-                  </select>
-                  <button
-                    onClick={createOccupant}
-                    disabled={!occName || !occPhone}
-                  >
-                    Add Occupant
-                  </button>
-                </div>
-
-                {occupants.length > 0 && (
-                  <ul className="occupant-list">
-                    {occupants.map((o) => (
-                      <li key={o.id} className="occupant-item">
-                        <div>
-                          <strong>{o.name}</strong> ({o.role})
-                        </div>
-                        <div className="occupant-phone">{o.phone}</div>
-                        <div
-                          className={
-                            o.is_active
-                              ? "occupant-status active"
-                              : "occupant-status inactive"
-                          }
-                        >
-                          {o.is_active ? "Active" : "Inactive"}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {/* Maintenance / Invoices for selected unit */}
-            {selectedUnitId && (
-              <div className="section">
-                <h3 className="section-title">
-                  Maintenance & Invoices – unit: {selectedUnitLabel}
-                </h3>
-
-                {/* Filter row */}
-                <div className="invoice-filter">
-                  <label className="invoice-filter-label">
-                    Filter by month:
-                  </label>
-                  <input
-                    type="month"
-                    value={invFilterMonth}
-                    onChange={(e) => setInvFilterMonth(e.target.value)}
-                  />
-                  <button
-                    className="btn-small"
-                    onClick={handleApplyInvoiceFilter}
-                  >
-                    Apply
-                  </button>
-                  {invFilterMonth && (
-                    <button
-                      className="btn-ghost"
-                      onClick={handleClearInvoiceFilter}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <div className="invoice-form">
-                  <input
-                    placeholder='Period (e.g., "Jan 2025")'
-                    value={invPeriod}
-                    onChange={(e) => setInvPeriod(e.target.value)}
-                  />
-                  <input
-                    placeholder="Amount (e.g., 2500)"
-                    type="number"
-                    value={invAmount}
-                    onChange={(e) => setInvAmount(e.target.value)}
-                  />
-                  <input
-                    placeholder="Due date (YYYY-MM-DD)"
-                    value={invDueDate}
-                    onChange={(e) => setInvDueDate(e.target.value)}
-                  />
-                  <button
-                    onClick={createInvoice}
-                    disabled={!invPeriod || !invAmount || !invDueDate}
-                  >
-                    Create Invoice
-                  </button>
-                </div>
-
-                {invoices.length > 0 && (
-                  <table className="invoice-table">
-                    <thead>
-                      <tr>
-                        <th>Period</th>
-                        <th>Amount</th>
-                        <th>Due date</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {invoices.map((inv) => (
-                        <tr key={inv.id}>
-                          <td>{inv.period_label}</td>
-                          <td>₹{inv.amount}</td>
-                          <td>{inv.due_date}</td>
-                          <td>
-                            <span
-                              className={
-                                inv.status === "paid"
-                                  ? "badge badge-paid"
-                                  : "badge badge-due"
-                              }
-                            >
-                              {inv.status}
-                            </span>
-                          </td>
-                          <td>
-                            {inv.status !== "paid" && (
-                              <button
-                                className="btn-small"
-                                onClick={() => markInvoicePaid(inv.id)}
-                              >
-                                Mark Paid
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-          </>
+            {error && <div className="error">{error}</div>}
+          </div>
         )}
 
-        {aptMessage && <p className="info">{aptMessage}</p>}
-        {unitMessage && <p className="info">{unitMessage}</p>}
-        {occMessage && <p className="info">{occMessage}</p>}
-        {invMessage && <p className="info">{invMessage}</p>}
-        {error && <p className="error">{error}</p>}
-      </div>
+        {/* STEP: APARTMENT */}
+        {step === "apartment" && (
+          <>
+            {/* Apartment Form */}
+            <section className="card">
+              <h2>Create Apartment</h2>
+              {aptMessage && <div className="success">{aptMessage}</div>}
+              {error && <div className="error">{error}</div>}
+              
+              <div className="form-group">
+                <label>Apartment Name</label>
+                <input
+                  type="text"
+                  value={aptName}
+                  onChange={(e) => setAptName(e.target.value)}
+                  placeholder="e.g. Sunrise Towers"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>City</label>
+                <input
+                  type="text"
+                  value={aptCity}
+                  onChange={(e) => setAptCity(e.target.value)}
+                  placeholder="e.g. Bangalore"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Total Units</label>
+                <input
+                  type="number"
+                  value={aptUnits}
+                  onChange={(e) => setAptUnits(e.target.value)}
+                  placeholder="e.g. 50"
+                  min="1"
+                />
+              </div>
+              
+              <button onClick={createApartment} className="btn-primary">
+                Create Apartment
+              </button>
+            </section>
+
+            {/* Apartments List */}
+            <section className="card">
+              <h2>Your Apartments</h2>
+              {createdApartments.length === 0 ? (
+                <p className="empty-state">No apartments yet. Create one above!</p>
+              ) : (
+                <div className="list">
+                  {createdApartments.map((apt) => (
+                    <div
+                      key={apt.id}
+                      className={`list-item ${
+                        selectedApartmentId === apt.id ? "selected" : ""
+                      }`}
+                      onClick={() => handleSelectApartment(apt)}
+                    >
+                      <div className="list-item-title">{apt.name}</div>
+                      <div className="list-item-meta">
+                        {apt.city} • {apt.total_units} units
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Units Section */}
+            {selectedApartmentId && (
+              <>
+                <section className="card">
+                  <h2>Units in {selectedApartmentName}</h2>
+                  {unitMessage && <div className="success">{unitMessage}</div>}
+                  
+                  <div className="form-group">
+                    <label>Unit Name</label>
+                    <input
+                      type="text"
+                      value={unitName}
+                      onChange={(e) => setUnitName(e.target.value)}
+                      placeholder="e.g. A-101"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>BHK Type</label>
+                    <select
+                      value={unitBhk}
+                      onChange={(e) => setUnitBhk(e.target.value)}
+                    >
+                      <option value="1BHK">1BHK</option>
+                      <option value="2BHK">2BHK</option>
+                      <option value="3BHK">3BHK</option>
+                      <option value="4BHK">4BHK</option>
+                      <option value="5BHK">5BHK</option>
+                    </select>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Status</label>
+                    <select
+                      value={unitStatus}
+                      onChange={(e) => setUnitStatus(e.target.value)}
+                    >
+                      <option value="vacant">Vacant</option>
+                      <option value="occupied">Occupied</option>
+                    </select>
+                  </div>
+                  
+                  <button onClick={createUnit} className="btn-primary">
+                    Add Unit
+                  </button>
+                </section>
+
+                <section className="card">
+                  <h3>Units List</h3>
+                  {units.length === 0 ? (
+                    <p className="empty-state">No units yet. Add one above!</p>
+                  ) : (
+                    <div className="list">
+                      {units.map((u) => (
+                        <div
+                          key={u.id}
+                          className={`list-item ${
+                            selectedUnitId === u.id ? "selected" : ""
+                          }`}
+                          onClick={() => handleSelectUnit(u)}
+                        >
+                          <div className="list-item-title">{u.name}</div>
+                          <div className="list-item-meta">
+                            {u.bhk_type} • {u.status}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {/* Occupants Section */}
+            {selectedUnitId && (
+              <>
+                <section className="card">
+                  <h2>Occupants for {selectedUnitLabel}</h2>
+                  {occMessage && <div className="success">{occMessage}</div>}
+                  
+                  <div className="form-group">
+                    <label>Name</label>
+                    <input
+                      type="text"
+                      value={occName}
+                      onChange={(e) => setOccName(e.target.value)}
+                      placeholder="e.g. John Doe"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Phone</label>
+                    <input
+                      type="tel"
+                      value={occPhone}
+                      onChange={(e) => setOccPhone(e.target.value)}
+                      placeholder="e.g. 9876543210"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Role</label>
+                    <select
+                      value={occRole}
+                      onChange={(e) => setOccRole(e.target.value)}
+                    >
+                      <option value="owner">Owner</option>
+                      <option value="tenant">Tenant</option>
+                      <option value="family">Family</option>
+                    </select>
+                  </div>
+                  
+                  <button onClick={createOccupant} className="btn-primary">
+                    Add Occupant
+                  </button>
+                </section>
+
+                <section className="card">
+                  <h3>Occupants List</h3>
+                  {occupants.length === 0 ? (
+                    <p className="empty-state">No occupants yet. Add one above!</p>
+                  ) : (
+                    <div className="list">
+                      {occupants.map((occ) => (
+                        <div key={occ.id} className="list-item">
+                          <div className="list-item-title">{occ.name}</div>
+                          <div className="list-item-meta">
+                            {occ.phone} • {occ.role} • {occ.is_active ? "Active" : "Inactive"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {/* Invoices Section */}
+                <section className="card">
+                  <h2>Invoices for {selectedUnitLabel}</h2>
+                  {invMessage && <div className="success">{invMessage}</div>}
+                  
+                  <div className="form-group">
+                    <label>Period Label</label>
+                    <input
+                      type="text"
+                      value={invPeriod}
+                      onChange={(e) => setInvPeriod(e.target.value)}
+                      placeholder="e.g. January 2024"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Amount (₹)</label>
+                    <input
+                      type="number"
+                      value={invAmount}
+                      onChange={(e) => setInvAmount(e.target.value)}
+                      placeholder="e.g. 5000"
+                      min="0"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Due Date</label>
+                    <input
+                      type="date"
+                      value={invDueDate}
+                      onChange={(e) => setInvDueDate(e.target.value)}
+                    />
+                  </div>
+                  
+                  <button onClick={createInvoice} className="btn-primary">
+                    Create Invoice
+                  </button>
+                </section>
+
+                <section className="card">
+                  <h3>Invoices List</h3>
+                  
+                  <div className="form-group">
+                    <label>Filter by Month (YYYY-MM)</label>
+                    <input
+                      type="text"
+                      value={invFilterMonth}
+                      onChange={(e) => {
+                        setInvFilterMonth(e.target.value);
+                        if (selectedUnitId) {
+                          fetchInvoices(selectedUnitId, e.target.value || undefined);
+                        }
+                      }}
+                      placeholder="e.g. 2024-01"
+                    />
+                  </div>
+                  
+                  {invoices.length === 0 ? (
+                    <p className="empty-state">No invoices yet. Create one above!</p>
+                  ) : (
+                    <div className="list">
+                      {invoices.map((inv) => (
+                        <div key={inv.id} className="list-item invoice-item">
+                          <div className="list-item-title">
+                            {inv.period_label}
+                          </div>
+                          <div className="list-item-meta">
+                            ₹{inv.amount} • Due: {inv.due_date} • 
+                            <span className={`status-${inv.status}`}>
+                              {inv.status}
+                            </span>
+                          </div>
+                          {inv.status !== "paid" && (
+                            <button
+                              onClick={() => markPaid(inv.id)}
+                              className="btn-small"
+                            >
+                              Mark as Paid
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {/* Dashboard Section */}
+            <section className="card dashboard">
+              <h2>📊 Dashboard</h2>
+              {dashboard ? (
+                <>
+                  <div className="dashboard-summary">
+                    <div className="summary-card">
+                      <div className="summary-title">Total Due</div>
+                      <div className="summary-value due">
+                        ₹{dashboard.overall_due_amount}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-title">Total Paid</div>
+                      <div className="summary-value paid">
+                        ₹{dashboard.overall_paid_amount}
+                      </div>
+                    </div>
+                  </div>
+
+                  {dashboard.apartments && dashboard.apartments.length > 0 && (
+                    <div className="apartment-stats">
+                      <h3>Apartment Statistics</h3>
+                      {dashboard.apartments.map((apt) => (
+                        <div key={apt.apartment_id} className="stat-card">
+                          <h4>{apt.apartment_name}</h4>
+                          <div className="stat-grid">
+                            <div className="stat-item">
+                              <span className="stat-label">Total Units:</span>
+                              <span className="stat-value">{apt.total_units}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-label">Occupied:</span>
+                              <span className="stat-value">{apt.occupied_units}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-label">Vacant:</span>
+                              <span className="stat-value">{apt.vacant_units}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-label">Invoices:</span>
+                              <span className="stat-value">{apt.total_invoices}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-label">Due Amount:</span>
+                              <span className="stat-value due">₹{apt.total_due_amount}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-label">Paid Amount:</span>
+                              <span className="stat-value paid">₹{apt.total_paid_amount}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="empty-state">Loading dashboard...</p>
+              )}
+            </section>
+          </>
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <p>OurNest • Apartment Management Made Easy</p>
+        {mobile && <p className="user-info">Logged in as: {mobile}</p>}
+      </footer>
     </div>
   );
 }
