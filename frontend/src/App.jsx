@@ -828,11 +828,11 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        showPopupMessage(data.detail || "Could not mark invoice as paid.");
+        showPopupMessage(data.detail || "Could not mark invoice as unpaid.");
         return;
       }
 
-      showPopupMessage("Invoice marked as paid!", "success");
+      showPopupMessage("Invoice marked as unpaid!", "success");
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
@@ -853,11 +853,11 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        showPopupMessage(data.detail || "Could not mark invoice as unpaid.");
+        showPopupMessage(data.detail || "Could not mark invoice as paid.");
         return;
       }
 
-      showPopupMessage("Invoice marked as unpaid!", "success");
+      showPopupMessage("Invoice marked as paid!", "success");
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
