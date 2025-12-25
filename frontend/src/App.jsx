@@ -207,6 +207,28 @@ export default function App() {
     setError("");
     setAptMessage("");
 
+    // Validation
+    if (!aptName.trim()) {
+      setError("Apartment name is required");
+      return;
+    }
+    if (aptName.trim().length < 2) {
+      setError("Apartment name must be at least 2 characters");
+      return;
+    }
+    if (!aptCity.trim()) {
+      setError("City is required");
+      return;
+    }
+    if (aptCity.trim().length < 2) {
+      setError("City name must be at least 2 characters");
+      return;
+    }
+    if (!aptUnits || parseInt(aptUnits) <= 0) {
+      setError("Total units must be greater than 0");
+      return;
+    }
+
     const totalUnitsNum = parseInt(aptUnits, 10);
 
     try {
@@ -214,8 +236,8 @@ export default function App() {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          name: aptName,
-          city: aptCity,
+          name: aptName.trim(),
+          city: aptCity.trim(),
           total_units: totalUnitsNum,
         }),
       });
@@ -277,6 +299,12 @@ export default function App() {
     setError("");
     setUnitMessage("");
 
+    // Validation
+    if (!unitName.trim()) {
+      setError("Unit name is required");
+      return;
+    }
+
     try {
       const res = await fetch(
         `${API_BASE_URL}/apartments/${selectedApartmentId}/units`,
@@ -284,7 +312,7 @@ export default function App() {
           method: "POST",
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            name: unitName,
+            name: unitName.trim(),
             bhk_type: unitBhk,
             status: unitStatus,
           }),
@@ -304,6 +332,42 @@ export default function App() {
       setUnitStatus("vacant");
       fetchUnits(selectedApartmentId);
       fetchDashboard();
+    } catch {
+      setError("Could not reach server.");
+    }
+  };
+
+  const deleteUnit = async (unitId) => {
+    if (!confirm("Are you sure you want to delete this unit?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/units/${unitId}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.detail || "Could not delete unit.");
+        return;
+      }
+
+      setUnitMessage("Unit deleted successfully!");
+      fetchUnits(selectedApartmentId);
+      fetchDashboard();
+      
+      // Clear selected unit if it was deleted
+      if (selectedUnitId === unitId) {
+        setSelectedUnitId(null);
+        setSelectedUnitLabel("");
+        setOccupants([]);
+        setInvoices([]);
+      }
     } catch {
       setError("Could not reach server.");
     }
@@ -351,6 +415,24 @@ export default function App() {
     setError("");
     setOccMessage("");
 
+    // Validation
+    if (!occName.trim()) {
+      setError("Occupant name is required");
+      return;
+    }
+    if (occName.trim().length < 2) {
+      setError("Name must be at least 2 characters");
+      return;
+    }
+    if (!occPhone.trim()) {
+      setError("Phone number is required");
+      return;
+    }
+    if (occPhone.trim().length < 10) {
+      setError("Phone number must be at least 10 digits");
+      return;
+    }
+
     try {
       const res = await fetch(
         `${API_BASE_URL}/units/${selectedUnitId}/occupants`,
@@ -358,8 +440,8 @@ export default function App() {
           method: "POST",
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            name: occName,
-            phone: occPhone,
+            name: occName.trim(),
+            phone: occPhone.trim(),
             role: occRole,
           }),
         }
@@ -377,9 +459,40 @@ export default function App() {
       );
       setOccName("");
       setOccPhone("");
-      setOccRole("tenant");
+      setOccRole("owner");
       fetchOccupants(selectedUnitId);
 
+      if (selectedApartmentId) {
+        fetchUnits(selectedApartmentId);
+      }
+      fetchDashboard();
+    } catch {
+      setError("Could not reach server.");
+    }
+  };
+
+  const deleteOccupant = async (occupantId) => {
+    if (!confirm("Are you sure you want to delete this occupant?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/occupants/${occupantId}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.detail || "Could not delete occupant.");
+        return;
+      }
+
+      setOccMessage("Occupant deleted successfully!");
+      fetchOccupants(selectedUnitId);
       if (selectedApartmentId) {
         fetchUnits(selectedApartmentId);
       }
@@ -417,6 +530,24 @@ export default function App() {
     setError("");
     setInvMessage("");
 
+    // Validation
+    if (!invPeriod.trim()) {
+      setError("Period label is required (e.g., 'Jan 2024')");
+      return;
+    }
+    if (invPeriod.trim().length < 3) {
+      setError("Period label must be at least 3 characters");
+      return;
+    }
+    if (!invAmount || parseInt(invAmount) <= 0) {
+      setError("Amount must be greater than 0");
+      return;
+    }
+    if (!invDueDate) {
+      setError("Due date is required");
+      return;
+    }
+
     const amountNum = parseInt(invAmount, 10);
 
     try {
@@ -426,7 +557,7 @@ export default function App() {
           method: "POST",
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            period_label: invPeriod,
+            period_label: invPeriod.trim(),
             amount: amountNum,
             due_date: invDueDate,
           }),
@@ -589,30 +720,35 @@ export default function App() {
 
             {/* Main Content */}
             <div className="main-content">
+              {/* Global Error Message */}
+              {error && <div className="error" style={{marginBottom: '16px'}}>{error}</div>}
+
               {/* Create Apartment */}
               <div className="section">
                 <h2>Create New Apartment</h2>
                 {aptMessage && <div className="success">{aptMessage}</div>}
-                {error && <div className="error">{error}</div>}
                 <div className="form-horizontal">
                   <input
                     type="text"
                     value={aptName}
                     onChange={(e) => setAptName(e.target.value)}
-                    placeholder="Apartment name"
+                    placeholder="Apartment name *"
+                    required
                   />
                   <input
                     type="text"
                     value={aptCity}
                     onChange={(e) => setAptCity(e.target.value)}
-                    placeholder="City"
+                    placeholder="City *"
+                    required
                   />
                   <input
                     type="number"
                     value={aptUnits}
                     onChange={(e) => setAptUnits(e.target.value)}
-                    placeholder="Total units"
+                    placeholder="Total units *"
                     min="1"
+                    required
                   />
                   <button onClick={createApartment}>Create Apartment</button>
                 </div>
@@ -628,7 +764,8 @@ export default function App() {
                       type="text"
                       value={unitName}
                       onChange={(e) => setUnitName(e.target.value)}
-                      placeholder="Unit name (e.g. A-101)"
+                      placeholder="Unit name (e.g. A-101) *"
+                      required
                     />
                     <select
                       value={unitBhk}
@@ -655,11 +792,22 @@ export default function App() {
                         <div
                           key={u.id}
                           className={`unit-card ${selectedUnitId === u.id ? "selected" : ""}`}
-                          onClick={() => handleSelectUnit(u)}
                         >
-                          <div className="unit-name">{u.name}</div>
-                          <div className="unit-bhk">{u.bhk_type}</div>
-                          <span className={`badge badge-${u.status}`}>{u.status}</span>
+                          <div onClick={() => handleSelectUnit(u)} style={{cursor: 'pointer'}}>
+                            <div className="unit-name">{u.name}</div>
+                            <div className="unit-bhk">{u.bhk_type}</div>
+                            <span className={`badge badge-${u.status}`}>{u.status}</span>
+                          </div>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteUnit(u.id);
+                            }}
+                            className="btn-small"
+                            style={{marginTop: '8px', background: '#ef4444'}}
+                          >
+                            Delete
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -677,13 +825,15 @@ export default function App() {
                       type="text"
                       value={occName}
                       onChange={(e) => setOccName(e.target.value)}
-                      placeholder="Name"
+                      placeholder="Name *"
+                      required
                     />
                     <input
                       type="tel"
                       value={occPhone}
                       onChange={(e) => setOccPhone(e.target.value)}
-                      placeholder="Phone"
+                      placeholder="Phone *"
+                      required
                     />
                     <select
                       value={occRole}
@@ -704,9 +854,18 @@ export default function App() {
                             <span className="role-badge">{occ.role}</span>
                             <div className="occupant-phone">{occ.phone}</div>
                           </div>
-                          <span className={`badge badge-${occ.is_active ? 'active' : 'inactive'}`}>
-                            {occ.is_active ? 'Active' : 'Inactive'}
-                          </span>
+                          <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+                            <span className={`badge badge-${occ.is_active ? 'active' : 'inactive'}`}>
+                              {occ.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                            <button 
+                              onClick={() => deleteOccupant(occ.id)}
+                              className="btn-small"
+                              style={{background: '#ef4444'}}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -724,19 +883,22 @@ export default function App() {
                       type="text"
                       value={invPeriod}
                       onChange={(e) => setInvPeriod(e.target.value)}
-                      placeholder="Period (e.g. Jan 2024)"
+                      placeholder="Period (e.g. Jan 2024) *"
+                      required
                     />
                     <input
                       type="number"
                       value={invAmount}
                       onChange={(e) => setInvAmount(e.target.value)}
-                      placeholder="Amount (₹)"
-                      min="0"
+                      placeholder="Amount (₹) *"
+                      min="1"
+                      required
                     />
                     <input
                       type="date"
                       value={invDueDate}
                       onChange={(e) => setInvDueDate(e.target.value)}
+                      required
                     />
                     <button onClick={createInvoice}>Create Invoice</button>
                   </div>

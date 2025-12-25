@@ -875,6 +875,102 @@ def get_dashboard(mobile: str = Depends(verify_token), db: Session = Depends(get
         overall_paid_amount=overall_paid,
     )
 
+# ---------- Delete Endpoints ----------
+
+@app.delete("/units/{unit_id}")
+def delete_unit(
+    unit_id: int,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete a unit"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
+    # Check if unit has occupants
+    occupants_count = db.query(models.Occupant).filter(
+        models.Occupant.unit_id == unit_id,
+        models.Occupant.is_active == True
+    ).count()
+    
+    if occupants_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete unit with active occupants. Please remove occupants first."
+        )
+    
+    # Check if unit has invoices
+    invoices_count = db.query(models.MaintenanceInvoice).filter(
+        models.MaintenanceInvoice.unit_id == unit_id
+    ).count()
+    
+    if invoices_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete unit with invoices. Please delete invoices first."
+        )
+    
+    db.delete(unit)
+    db.commit()
+    
+    return {"message": "Unit deleted successfully", "id": unit_id}
+
+@app.delete("/occupants/{occupant_id}")
+def delete_occupant(
+    occupant_id: int,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete an occupant"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    occupant = (
+        db.query(models.Occupant)
+        .join(models.Unit, models.Occupant.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Occupant.id == occupant_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if occupant is None:
+        raise HTTPException(status_code=404, detail="Occupant not found.")
+    
+    unit = db.query(models.Unit).filter(models.Unit.id == occupant.unit_id).first()
+    
+    # Delete occupant
+    db.delete(occupant)
+    
+    # Update unit status if no more active occupants
+    remaining_occupants = db.query(models.Occupant).filter(
+        models.Occupant.unit_id == unit.id,
+        models.Occupant.is_active == True,
+        models.Occupant.id != occupant_id
+    ).count()
+    
+    if remaining_occupants == 0:
+        unit.status = "vacant"
+    
+    db.commit()
+    
+    return {"message": "Occupant deleted successfully", "id": occupant_id}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
