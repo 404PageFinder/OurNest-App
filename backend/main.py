@@ -875,6 +875,291 @@ def get_dashboard(mobile: str = Depends(verify_token), db: Session = Depends(get
         overall_paid_amount=overall_paid,
     )
 
+# ---------- Check Name/Phone Uniqueness Endpoints ----------
+
+@app.get("/apartments/check-name")
+def check_apartment_name(
+    name: str,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Check if apartment name exists for this user"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.created_by_user_id == user.id,
+            func.lower(models.Apartment.name) == name.strip().lower()
+        )
+        .first()
+    )
+    
+    return {
+        "exists": apartment is not None,
+        "apartment_id": apartment.id if apartment else None
+    }
+
+@app.get("/apartments/{apartment_id}/units/check-name")
+def check_unit_name(
+    apartment_id: int,
+    name: str,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Check if unit name exists in this apartment"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.id == apartment_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if apartment is None:
+        raise HTTPException(status_code=404, detail="Apartment not found.")
+    
+    unit = (
+        db.query(models.Unit)
+        .filter(
+            models.Unit.apartment_id == apartment_id,
+            func.lower(models.Unit.name) == name.strip().lower()
+        )
+        .first()
+    )
+    
+    return {
+        "exists": unit is not None,
+        "unit_id": unit.id if unit else None
+    }
+
+@app.get("/units/{unit_id}/occupants/check-phone")
+def check_occupant_phone(
+    unit_id: int,
+    phone: str,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Check if phone number exists in this unit"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
+    occupant = (
+        db.query(models.Occupant)
+        .filter(
+            models.Occupant.unit_id == unit_id,
+            models.Occupant.phone == phone.strip()
+        )
+        .first()
+    )
+    
+    return {
+        "exists": occupant is not None,
+        "occupant_id": occupant.id if occupant else None
+    }
+
+# ---------- Update (Edit) Endpoints ----------
+
+@app.put("/apartments/{apartment_id}", response_model=ApartmentResponse)
+def update_apartment(
+    apartment_id: int,
+    data: ApartmentCreateRequest,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing apartment"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    apartment = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.id == apartment_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if apartment is None:
+        raise HTTPException(status_code=404, detail="Apartment not found.")
+    
+    # Check for duplicate name (excluding current apartment)
+    existing = (
+        db.query(models.Apartment)
+        .filter(
+            models.Apartment.created_by_user_id == user.id,
+            func.lower(models.Apartment.name) == data.name.strip().lower(),
+            models.Apartment.id != apartment_id
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Apartment name '{data.name}' already exists."
+        )
+    
+    apartment.name = data.name.strip()
+    apartment.city = data.city.strip()
+    apartment.total_units = data.total_units
+    
+    db.commit()
+    db.refresh(apartment)
+    
+    return apartment
+
+@app.put("/units/{unit_id}", response_model=UnitResponse)
+def update_unit(
+    unit_id: int,
+    data: UnitCreateRequest,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing unit"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    unit = (
+        db.query(models.Unit)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Unit.id == unit_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found.")
+    
+    # Check for duplicate name in same apartment (excluding current unit)
+    existing = (
+        db.query(models.Unit)
+        .filter(
+            models.Unit.apartment_id == unit.apartment_id,
+            func.lower(models.Unit.name) == data.name.strip().lower(),
+            models.Unit.id != unit_id
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unit name '{data.name}' already exists in this apartment."
+        )
+    
+    unit.name = data.name.strip()
+    unit.bhk_type = data.bhk_type.upper()
+    unit.status = data.status.lower()
+    
+    db.commit()
+    db.refresh(unit)
+    
+    return unit
+
+@app.put("/occupants/{occupant_id}", response_model=OccupantResponse)
+def update_occupant(
+    occupant_id: int,
+    data: OccupantCreateRequest,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing occupant"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    occupant = (
+        db.query(models.Occupant)
+        .join(models.Unit, models.Occupant.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.Occupant.id == occupant_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if occupant is None:
+        raise HTTPException(status_code=404, detail="Occupant not found.")
+    
+    # Check for duplicate phone in same unit (excluding current occupant)
+    existing = (
+        db.query(models.Occupant)
+        .filter(
+            models.Occupant.unit_id == occupant.unit_id,
+            models.Occupant.phone == data.phone.strip(),
+            models.Occupant.id != occupant_id
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Phone number '{data.phone}' already exists in this unit."
+        )
+    
+    occupant.name = data.name.strip()
+    occupant.phone = data.phone.strip()
+    occupant.role = data.role.lower()
+    
+    db.commit()
+    db.refresh(occupant)
+    
+    return occupant
+
+@app.put("/invoices/{invoice_id}", response_model=InvoiceResponse)
+def update_invoice(
+    invoice_id: int,
+    data: InvoiceCreateRequest,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Update an existing invoice"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    invoice = (
+        db.query(models.MaintenanceInvoice)
+        .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.MaintenanceInvoice.id == invoice_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    
+    invoice.period_label = data.period_label.strip()
+    invoice.amount = data.amount
+    invoice.due_date = data.due_date.strip()
+    
+    db.commit()
+    db.refresh(invoice)
+    
+    return invoice
+
 # ---------- Delete Endpoints ----------
 
 @app.delete("/units/{unit_id}")
@@ -970,6 +1255,67 @@ def delete_occupant(
     db.commit()
     
     return {"message": "Occupant deleted successfully", "id": occupant_id}
+
+@app.delete("/invoices/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Delete an invoice"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    invoice = (
+        db.query(models.MaintenanceInvoice)
+        .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.MaintenanceInvoice.id == invoice_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    
+    db.delete(invoice)
+    db.commit()
+    
+    return {"message": "Invoice deleted successfully", "id": invoice_id}
+
+@app.post("/invoices/{invoice_id}/mark-unpaid", response_model=InvoiceResponse)
+def mark_invoice_unpaid(
+    invoice_id: int,
+    mobile: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Mark invoice as unpaid (revert paid status)"""
+    user = db.query(models.User).filter(models.User.mobile == mobile).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    invoice = (
+        db.query(models.MaintenanceInvoice)
+        .join(models.Unit, models.MaintenanceInvoice.unit_id == models.Unit.id)
+        .join(models.Apartment, models.Unit.apartment_id == models.Apartment.id)
+        .filter(
+            models.MaintenanceInvoice.id == invoice_id,
+            models.Apartment.created_by_user_id == user.id,
+        )
+        .first()
+    )
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    
+    invoice.status = "due"
+    invoice.paid_at = None
+    
+    db.commit()
+    db.refresh(invoice)
+    
+    return invoice
 
 if __name__ == "__main__":
     import uvicorn

@@ -753,3 +753,85 @@ button:disabled {
     border: 1px solid var(--border);
   }
 }
+/* Popup styles */
+.popup {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  animation: slideIn 0.3s ease-out;
+  max-width: 400px;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.popup-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.popup.error .popup-content {
+  background: #fee2e2;
+  border-left: 4px solid #ef4444;
+  color: #991b1b;
+}
+
+.popup.success .popup-content {
+  background: #d1fae5;
+  border-left: 4px solid #10b981;
+  color: #065f46;
+}
+
+.popup-icon {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.popup.error .popup-icon {
+  color: #ef4444;
+}
+
+.popup.success .popup-icon {
+  color: #10b981;
+}
+
+.popup-text {
+  flex: 1;
+}
+
+/* Button icon style */
+.btn-icon {
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.btn-icon:hover {
+  opacity: 1;
+}
+
+/* Adjust apartment list item for edit button */
+.apt-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

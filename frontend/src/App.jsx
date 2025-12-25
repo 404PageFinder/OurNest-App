@@ -13,12 +13,19 @@ export default function App() {
   const [error, setError] = useState("");
   const [backendStatus, setBackendStatus] = useState("checking...");
 
+  // Popup state
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupMessage, setPopupMessage] = useState("");
+  const [popupType, setPopupType] = useState("error"); // "error" or "success"
+
   // Apartment form + list
   const [aptName, setAptName] = useState("");
   const [aptCity, setAptCity] = useState("");
   const [aptUnits, setAptUnits] = useState("");
   const [aptMessage, setAptMessage] = useState("");
   const [createdApartments, setCreatedApartments] = useState([]);
+  const [editingApartmentId, setEditingApartmentId] = useState(null);
+  const [aptNameExists, setAptNameExists] = useState(false);
 
   // Selected apartment for Units
   const [selectedApartmentId, setSelectedApartmentId] = useState(null);
@@ -30,6 +37,8 @@ export default function App() {
   const [unitBhk, setUnitBhk] = useState("2BHK");
   const [unitStatus, setUnitStatus] = useState("vacant");
   const [unitMessage, setUnitMessage] = useState("");
+  const [editingUnitId, setEditingUnitId] = useState(null);
+  const [unitNameExists, setUnitNameExists] = useState(false);
 
   // Selected unit for occupants / invoices
   const [selectedUnitId, setSelectedUnitId] = useState(null);
@@ -41,6 +50,8 @@ export default function App() {
   const [occPhone, setOccPhone] = useState("");
   const [occRole, setOccRole] = useState("owner");
   const [occMessage, setOccMessage] = useState("");
+  const [editingOccupantId, setEditingOccupantId] = useState(null);
+  const [occPhoneExists, setOccPhoneExists] = useState(false);
 
   // Invoices
   const [invoices, setInvoices] = useState([]);
@@ -49,11 +60,20 @@ export default function App() {
   const [invDueDate, setInvDueDate] = useState("");
   const [invMessage, setInvMessage] = useState("");
   const [invFilterMonth, setInvFilterMonth] = useState("");
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
 
   // Dashboard
   const [dashboard, setDashboard] = useState(null);
 
   const isValidMobile = /^[6-9]\d{9}$/.test(mobile);
+
+  // Helper to show popup
+  const showPopupMessage = (message, type = "error") => {
+    setPopupMessage(message);
+    setPopupType(type);
+    setShowPopup(true);
+    setTimeout(() => setShowPopup(false), 4000);
+  };
 
   // Helper to get auth headers with JWT token
   const getAuthHeaders = () => {
@@ -203,37 +223,73 @@ export default function App() {
     }
   };
 
+  // Check apartment name uniqueness
+  const checkApartmentNameExists = async (name) => {
+    if (!name.trim() || name.length < 2) {
+      setAptNameExists(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/apartments/check-name?name=${encodeURIComponent(name.trim())}`,
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+      const data = await res.json();
+      
+      // If editing, don't mark as exists if it's the same apartment
+      if (editingApartmentId && data.exists && data.apartment_id === editingApartmentId) {
+        setAptNameExists(false);
+      } else {
+        setAptNameExists(data.exists);
+      }
+    } catch {
+      setAptNameExists(false);
+    }
+  };
+
   const createApartment = async () => {
-    setError("");
     setAptMessage("");
 
     // Validation
     if (!aptName.trim()) {
-      setError("Apartment name is required");
+      showPopupMessage("Apartment name is required");
       return;
     }
     if (aptName.trim().length < 2) {
-      setError("Apartment name must be at least 2 characters");
+      showPopupMessage("Apartment name must be at least 2 characters");
+      return;
+    }
+    if (aptNameExists) {
+      showPopupMessage("Apartment name already exists");
       return;
     }
     if (!aptCity.trim()) {
-      setError("City is required");
+      showPopupMessage("City is required");
       return;
     }
     if (aptCity.trim().length < 2) {
-      setError("City name must be at least 2 characters");
+      showPopupMessage("City name must be at least 2 characters");
       return;
     }
     if (!aptUnits || parseInt(aptUnits) <= 0) {
-      setError("Total units must be greater than 0");
+      showPopupMessage("Total units must be greater than 0");
       return;
     }
 
     const totalUnitsNum = parseInt(aptUnits, 10);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/apartments`, {
-        method: "POST",
+      const url = editingApartmentId
+        ? `${API_BASE_URL}/apartments/${editingApartmentId}`
+        : `${API_BASE_URL}/apartments`;
+      
+      const method = editingApartmentId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: getAuthHeaders(),
         body: JSON.stringify({
           name: aptName.trim(),
@@ -245,19 +301,41 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Could not create apartment.");
+        showPopupMessage(data.detail || "Could not save apartment.");
         return;
       }
 
-      setAptMessage(`Apartment "${data.name}" created successfully!`);
+      const message = editingApartmentId
+        ? `Apartment "${data.name}" updated successfully!`
+        : `Apartment "${data.name}" created successfully!`;
+      
+      showPopupMessage(message, "success");
       setAptName("");
       setAptCity("");
       setAptUnits("");
+      setEditingApartmentId(null);
       fetchApartments();
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
     }
+  };
+
+  const editApartment = (apt) => {
+    setAptName(apt.name);
+    setAptCity(apt.city);
+    setAptUnits(apt.total_units.toString());
+    setEditingApartmentId(apt.id);
+    setAptNameExists(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEditApartment = () => {
+    setAptName("");
+    setAptCity("");
+    setAptUnits("");
+    setEditingApartmentId(null);
+    setAptNameExists(false);
   };
 
   const handleSelectApartment = (apt) => {
@@ -291,50 +369,104 @@ export default function App() {
     }
   };
 
-  const createUnit = async () => {
-    if (!selectedApartmentId) {
-      setUnitMessage("Please select an apartment first.");
-      return;
-    }
-    setError("");
-    setUnitMessage("");
-
-    // Validation
-    if (!unitName.trim()) {
-      setError("Unit name is required");
+  // Check unit name uniqueness
+  const checkUnitNameExists = async (name) => {
+    if (!selectedApartmentId || !name.trim()) {
+      setUnitNameExists(false);
       return;
     }
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/apartments/${selectedApartmentId}/units`,
+        `${API_BASE_URL}/apartments/${selectedApartmentId}/units/check-name?name=${encodeURIComponent(name.trim())}`,
         {
-          method: "POST",
           headers: getAuthHeaders(),
-          body: JSON.stringify({
-            name: unitName.trim(),
-            bhk_type: unitBhk,
-            status: unitStatus,
-          }),
         }
       );
+      const data = await res.json();
+      
+      // If editing, don't mark as exists if it's the same unit
+      if (editingUnitId && data.exists && data.unit_id === editingUnitId) {
+        setUnitNameExists(false);
+      } else {
+        setUnitNameExists(data.exists);
+      }
+    } catch {
+      setUnitNameExists(false);
+    }
+  };
+
+  const createUnit = async () => {
+    if (!selectedApartmentId) {
+      showPopupMessage("Please select an apartment first.");
+      return;
+    }
+    setUnitMessage("");
+
+    // Validation
+    if (!unitName.trim()) {
+      showPopupMessage("Unit name is required");
+      return;
+    }
+    if (unitNameExists) {
+      showPopupMessage("Unit name already exists in this apartment");
+      return;
+    }
+
+    try {
+      const url = editingUnitId
+        ? `${API_BASE_URL}/units/${editingUnitId}`
+        : `${API_BASE_URL}/apartments/${selectedApartmentId}/units`;
+      
+      const method = editingUnitId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: unitName.trim(),
+          bhk_type: unitBhk,
+          status: unitStatus,
+        }),
+      });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Could not create unit.");
+        showPopupMessage(data.detail || "Could not save unit.");
         return;
       }
 
-      setUnitMessage(`Unit "${data.name}" created successfully!`);
+      const message = editingUnitId
+        ? `Unit "${data.name}" updated successfully!`
+        : `Unit "${data.name}" created successfully!`;
+      
+      showPopupMessage(message, "success");
       setUnitName("");
       setUnitBhk("2BHK");
       setUnitStatus("vacant");
+      setEditingUnitId(null);
       fetchUnits(selectedApartmentId);
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
     }
+  };
+
+  const editUnit = (u) => {
+    setUnitName(u.name);
+    setUnitBhk(u.bhk_type);
+    setUnitStatus(u.status);
+    setEditingUnitId(u.id);
+    setUnitNameExists(false);
+  };
+
+  const cancelEditUnit = () => {
+    setUnitName("");
+    setUnitBhk("2BHK");
+    setUnitStatus("vacant");
+    setEditingUnitId(null);
+    setUnitNameExists(false);
   };
 
   const deleteUnit = async (unitId) => {
@@ -353,11 +485,11 @@ export default function App() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.detail || "Could not delete unit.");
+        showPopupMessage(data.detail || "Could not delete unit.");
         return;
       }
 
-      setUnitMessage("Unit deleted successfully!");
+      showPopupMessage("Unit deleted successfully!", "success");
       fetchUnits(selectedApartmentId);
       fetchDashboard();
       
@@ -369,7 +501,7 @@ export default function App() {
         setInvoices([]);
       }
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
     }
   };
 
@@ -407,59 +539,95 @@ export default function App() {
     }
   };
 
-  const createOccupant = async () => {
-    if (!selectedUnitId) {
-      setOccMessage("Please select a unit first.");
-      return;
-    }
-    setError("");
-    setOccMessage("");
-
-    // Validation
-    if (!occName.trim()) {
-      setError("Occupant name is required");
-      return;
-    }
-    if (occName.trim().length < 2) {
-      setError("Name must be at least 2 characters");
-      return;
-    }
-    if (!occPhone.trim()) {
-      setError("Phone number is required");
-      return;
-    }
-    if (occPhone.trim().length < 10) {
-      setError("Phone number must be at least 10 digits");
+  // Check occupant phone uniqueness
+  const checkOccupantPhoneExists = async (phone) => {
+    if (!selectedUnitId || !phone.trim() || phone.trim().length < 10) {
+      setOccPhoneExists(false);
       return;
     }
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/units/${selectedUnitId}/occupants`,
+        `${API_BASE_URL}/units/${selectedUnitId}/occupants/check-phone?phone=${encodeURIComponent(phone.trim())}`,
         {
-          method: "POST",
           headers: getAuthHeaders(),
-          body: JSON.stringify({
-            name: occName.trim(),
-            phone: occPhone.trim(),
-            role: occRole,
-          }),
         }
       );
+      const data = await res.json();
+      
+      // If editing, don't mark as exists if it's the same occupant
+      if (editingOccupantId && data.exists && data.occupant_id === editingOccupantId) {
+        setOccPhoneExists(false);
+      } else {
+        setOccPhoneExists(data.exists);
+      }
+    } catch {
+      setOccPhoneExists(false);
+    }
+  };
+
+  const createOccupant = async () => {
+    if (!selectedUnitId) {
+      showPopupMessage("Please select a unit first.");
+      return;
+    }
+    setOccMessage("");
+
+    // Validation
+    if (!occName.trim()) {
+      showPopupMessage("Occupant name is required");
+      return;
+    }
+    if (occName.trim().length < 2) {
+      showPopupMessage("Name must be at least 2 characters");
+      return;
+    }
+    if (!occPhone.trim()) {
+      showPopupMessage("Phone number is required");
+      return;
+    }
+    if (occPhone.trim().length < 10) {
+      showPopupMessage("Phone number must be at least 10 digits");
+      return;
+    }
+    if (occPhoneExists) {
+      showPopupMessage("Phone number already exists in this unit");
+      return;
+    }
+
+    try {
+      const url = editingOccupantId
+        ? `${API_BASE_URL}/occupants/${editingOccupantId}`
+        : `${API_BASE_URL}/units/${selectedUnitId}/occupants`;
+      
+      const method = editingOccupantId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: occName.trim(),
+          phone: occPhone.trim(),
+          role: occRole,
+        }),
+      });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Could not create occupant.");
+        showPopupMessage(data.detail || "Could not save occupant.");
         return;
       }
 
-      setOccMessage(
-        `Occupant "${data.name}" (${data.role}) added successfully!`
-      );
+      const message = editingOccupantId
+        ? `Occupant "${data.name}" updated successfully!`
+        : `Occupant "${data.name}" (${data.role}) added successfully!`;
+      
+      showPopupMessage(message, "success");
       setOccName("");
       setOccPhone("");
       setOccRole("owner");
+      setEditingOccupantId(null);
       fetchOccupants(selectedUnitId);
 
       if (selectedApartmentId) {
@@ -467,8 +635,24 @@ export default function App() {
       }
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
     }
+  };
+
+  const editOccupant = (occ) => {
+    setOccName(occ.name);
+    setOccPhone(occ.phone);
+    setOccRole(occ.role);
+    setEditingOccupantId(occ.id);
+    setOccPhoneExists(false);
+  };
+
+  const cancelEditOccupant = () => {
+    setOccName("");
+    setOccPhone("");
+    setOccRole("owner");
+    setEditingOccupantId(null);
+    setOccPhoneExists(false);
   };
 
   const deleteOccupant = async (occupantId) => {
@@ -487,18 +671,18 @@ export default function App() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.detail || "Could not delete occupant.");
+        showPopupMessage(data.detail || "Could not delete occupant.");
         return;
       }
 
-      setOccMessage("Occupant deleted successfully!");
+      showPopupMessage("Occupant deleted successfully!", "success");
       fetchOccupants(selectedUnitId);
       if (selectedApartmentId) {
         fetchUnits(selectedApartmentId);
       }
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
     }
   };
 
@@ -524,68 +708,114 @@ export default function App() {
 
   const createInvoice = async () => {
     if (!selectedUnitId) {
-      setInvMessage("Please select a unit first.");
+      showPopupMessage("Please select a unit first.");
       return;
     }
-    setError("");
     setInvMessage("");
 
     // Validation
     if (!invPeriod.trim()) {
-      setError("Period label is required (e.g., 'Jan 2024')");
+      showPopupMessage("Period label is required (e.g., 'Jan 2024')");
       return;
     }
     if (invPeriod.trim().length < 3) {
-      setError("Period label must be at least 3 characters");
+      showPopupMessage("Period label must be at least 3 characters");
       return;
     }
     if (!invAmount || parseInt(invAmount) <= 0) {
-      setError("Amount must be greater than 0");
+      showPopupMessage("Amount must be greater than 0");
       return;
     }
     if (!invDueDate) {
-      setError("Due date is required");
+      showPopupMessage("Due date is required");
       return;
     }
 
     const amountNum = parseInt(invAmount, 10);
 
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/units/${selectedUnitId}/invoices`,
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            period_label: invPeriod.trim(),
-            amount: amountNum,
-            due_date: invDueDate,
-          }),
-        }
-      );
+      const url = editingInvoiceId
+        ? `${API_BASE_URL}/invoices/${editingInvoiceId}`
+        : `${API_BASE_URL}/units/${selectedUnitId}/invoices`;
+      
+      const method = editingInvoiceId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          period_label: invPeriod.trim(),
+          amount: amountNum,
+          due_date: invDueDate,
+        }),
+      });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Could not create invoice.");
+        showPopupMessage(data.detail || "Could not save invoice.");
         return;
       }
 
-      setInvMessage(
-        `Invoice for "${data.period_label}" created successfully!`
-      );
+      const message = editingInvoiceId
+        ? `Invoice for "${data.period_label}" updated successfully!`
+        : `Invoice for "${data.period_label}" created successfully!`;
+      
+      showPopupMessage(message, "success");
       setInvPeriod("");
       setInvAmount("");
       setInvDueDate("");
+      setEditingInvoiceId(null);
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
+    }
+  };
+
+  const editInvoice = (inv) => {
+    setInvPeriod(inv.period_label);
+    setInvAmount(inv.amount.toString());
+    setInvDueDate(inv.due_date);
+    setEditingInvoiceId(inv.id);
+  };
+
+  const cancelEditInvoice = () => {
+    setInvPeriod("");
+    setInvAmount("");
+    setInvDueDate("");
+    setEditingInvoiceId(null);
+  };
+
+  const deleteInvoice = async (invoiceId) => {
+    if (!confirm("Are you sure you want to delete this invoice?")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/invoices/${invoiceId}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (!res.ok) {
+        const data = await res.json();
+        showPopupMessage(data.detail || "Could not delete invoice.");
+        return;
+      }
+
+      showPopupMessage("Invoice deleted successfully!", "success");
+      fetchInvoices(selectedUnitId, invFilterMonth || undefined);
+      fetchDashboard();
+    } catch {
+      showPopupMessage("Could not reach server.");
     }
   };
 
   const markPaid = async (invoiceId) => {
-    setError("");
     try {
       const res = await fetch(
         `${API_BASE_URL}/invoices/${invoiceId}/mark-paid`,
@@ -598,21 +828,58 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.detail || "Could not mark invoice as paid.");
+        showPopupMessage(data.detail || "Could not mark invoice as paid.");
         return;
       }
 
-      setInvMessage(`Invoice marked as paid!`);
+      showPopupMessage("Invoice marked as paid!", "success");
       fetchInvoices(selectedUnitId, invFilterMonth || undefined);
       fetchDashboard();
     } catch {
-      setError("Could not reach server.");
+      showPopupMessage("Could not reach server.");
+    }
+  };
+
+  const markUnpaid = async (invoiceId) => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/invoices/${invoiceId}/mark-unpaid`,
+        {
+          method: "POST",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        showPopupMessage(data.detail || "Could not mark invoice as unpaid.");
+        return;
+      }
+
+      showPopupMessage("Invoice marked as unpaid!", "success");
+      fetchInvoices(selectedUnitId, invFilterMonth || undefined);
+      fetchDashboard();
+    } catch {
+      showPopupMessage("Could not reach server.");
     }
   };
 
   // UI render starts here
   return (
     <div className="screen">
+      {/* Popup Message */}
+      {showPopup && (
+        <div className={`popup ${popupType}`}>
+          <div className="popup-content">
+            <span className="popup-icon">
+              {popupType === "success" ? "✓" : "⚠"}
+            </span>
+            <span className="popup-text">{popupMessage}</span>
+          </div>
+        </div>
+      )}
+
       <div className="app-container">
         {/* STEP: MOBILE */}
         {step === "mobile" && (
@@ -707,10 +974,21 @@ export default function App() {
                       <li
                         key={apt.id}
                         className={`apt-item ${selectedApartmentId === apt.id ? "selected" : ""}`}
-                        onClick={() => handleSelectApartment(apt)}
                       >
-                        <strong>{apt.name}</strong>
-                        <div className="apt-meta">{apt.city} • {apt.total_units} units</div>
+                        <div onClick={() => handleSelectApartment(apt)} style={{cursor: 'pointer', flex: 1}}>
+                          <strong>{apt.name}</strong>
+                          <div className="apt-meta">{apt.city} • {apt.total_units} units</div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            editApartment(apt);
+                          }}
+                          className="btn-icon"
+                          title="Edit"
+                        >
+                          ✏️
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -720,21 +998,27 @@ export default function App() {
 
             {/* Main Content */}
             <div className="main-content">
-              {/* Global Error Message */}
-              {error && <div className="error" style={{marginBottom: '16px'}}>{error}</div>}
-
-              {/* Create Apartment */}
+              {/* Create/Edit Apartment */}
               <div className="section">
-                <h2>Create New Apartment</h2>
+                <h2>{editingApartmentId ? "Edit Apartment" : "Create New Apartment"}</h2>
                 {aptMessage && <div className="success">{aptMessage}</div>}
                 <div className="form-horizontal">
-                  <input
-                    type="text"
-                    value={aptName}
-                    onChange={(e) => setAptName(e.target.value)}
-                    placeholder="Apartment name *"
-                    required
-                  />
+                  <div style={{position: 'relative', flex: 1}}>
+                    <input
+                      type="text"
+                      value={aptName}
+                      onChange={(e) => setAptName(e.target.value)}
+                      onBlur={(e) => checkApartmentNameExists(e.target.value)}
+                      placeholder="Apartment name *"
+                      required
+                      style={{borderColor: aptNameExists ? '#ef4444' : undefined}}
+                    />
+                    {aptNameExists && (
+                      <span style={{color: '#ef4444', fontSize: '12px', position: 'absolute', bottom: '-18px', left: 0}}>
+                        Name already exists
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={aptCity}
@@ -750,7 +1034,14 @@ export default function App() {
                     min="1"
                     required
                   />
-                  <button onClick={createApartment}>Create Apartment</button>
+                  <button onClick={createApartment}>
+                    {editingApartmentId ? "Update" : "Create"} Apartment
+                  </button>
+                  {editingApartmentId && (
+                    <button onClick={cancelEditApartment} className="btn-secondary">
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -760,13 +1051,22 @@ export default function App() {
                   <h2>Units in {selectedApartmentName}</h2>
                   {unitMessage && <div className="success">{unitMessage}</div>}
                   <div className="form-horizontal">
-                    <input
-                      type="text"
-                      value={unitName}
-                      onChange={(e) => setUnitName(e.target.value)}
-                      placeholder="Unit name (e.g. A-101) *"
-                      required
-                    />
+                    <div style={{position: 'relative', flex: 1}}>
+                      <input
+                        type="text"
+                        value={unitName}
+                        onChange={(e) => setUnitName(e.target.value)}
+                        onBlur={(e) => checkUnitNameExists(e.target.value)}
+                        placeholder="Unit name (e.g. A-101) *"
+                        required
+                        style={{borderColor: unitNameExists ? '#ef4444' : undefined}}
+                      />
+                      {unitNameExists && (
+                        <span style={{color: '#ef4444', fontSize: '12px', position: 'absolute', bottom: '-18px', left: 0}}>
+                          Unit name already exists
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={unitBhk}
                       onChange={(e) => setUnitBhk(e.target.value)}
@@ -783,7 +1083,14 @@ export default function App() {
                       <option value="vacant">Vacant</option>
                       <option value="occupied">Occupied</option>
                     </select>
-                    <button onClick={createUnit}>Add Unit</button>
+                    <button onClick={createUnit}>
+                      {editingUnitId ? "Update" : "Add"} Unit
+                    </button>
+                    {editingUnitId && (
+                      <button onClick={cancelEditUnit} className="btn-secondary">
+                        Cancel
+                      </button>
+                    )}
                   </div>
 
                   {units.length > 0 && (
@@ -798,16 +1105,28 @@ export default function App() {
                             <div className="unit-bhk">{u.bhk_type}</div>
                             <span className={`badge badge-${u.status}`}>{u.status}</span>
                           </div>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteUnit(u.id);
-                            }}
-                            className="btn-small"
-                            style={{marginTop: '8px', background: '#ef4444'}}
-                          >
-                            Delete
-                          </button>
+                          <div style={{display: 'flex', gap: '4px', marginTop: '8px'}}>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                editUnit(u);
+                              }}
+                              className="btn-small"
+                              style={{flex: 1}}
+                            >
+                              Edit
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteUnit(u.id);
+                              }}
+                              className="btn-small"
+                              style={{flex: 1, background: '#ef4444'}}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -828,13 +1147,22 @@ export default function App() {
                       placeholder="Name *"
                       required
                     />
-                    <input
-                      type="tel"
-                      value={occPhone}
-                      onChange={(e) => setOccPhone(e.target.value)}
-                      placeholder="Phone *"
-                      required
-                    />
+                    <div style={{position: 'relative', flex: 1}}>
+                      <input
+                        type="tel"
+                        value={occPhone}
+                        onChange={(e) => setOccPhone(e.target.value)}
+                        onBlur={(e) => checkOccupantPhoneExists(e.target.value)}
+                        placeholder="Phone *"
+                        required
+                        style={{borderColor: occPhoneExists ? '#ef4444' : undefined}}
+                      />
+                      {occPhoneExists && (
+                        <span style={{color: '#ef4444', fontSize: '12px', position: 'absolute', bottom: '-18px', left: 0}}>
+                          Phone already exists
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={occRole}
                       onChange={(e) => setOccRole(e.target.value)}
@@ -842,7 +1170,14 @@ export default function App() {
                       <option value="owner">Owner</option>
                       <option value="tenant">Tenant</option>
                     </select>
-                    <button onClick={createOccupant}>Add Occupant</button>
+                    <button onClick={createOccupant}>
+                      {editingOccupantId ? "Update" : "Add"} Occupant
+                    </button>
+                    {editingOccupantId && (
+                      <button onClick={cancelEditOccupant} className="btn-secondary">
+                        Cancel
+                      </button>
+                    )}
                   </div>
 
                   {occupants.length > 0 && (
@@ -858,6 +1193,12 @@ export default function App() {
                             <span className={`badge badge-${occ.is_active ? 'active' : 'inactive'}`}>
                               {occ.is_active ? 'Active' : 'Inactive'}
                             </span>
+                            <button 
+                              onClick={() => editOccupant(occ)}
+                              className="btn-small"
+                            >
+                              Edit
+                            </button>
                             <button 
                               onClick={() => deleteOccupant(occ.id)}
                               className="btn-small"
@@ -900,7 +1241,14 @@ export default function App() {
                       onChange={(e) => setInvDueDate(e.target.value)}
                       required
                     />
-                    <button onClick={createInvoice}>Create Invoice</button>
+                    <button onClick={createInvoice}>
+                      {editingInvoiceId ? "Update" : "Create"} Invoice
+                    </button>
+                    {editingInvoiceId && (
+                      <button onClick={cancelEditInvoice} className="btn-secondary">
+                        Cancel
+                      </button>
+                    )}
                   </div>
 
                   {invoices.length > 0 && (
@@ -928,7 +1276,7 @@ export default function App() {
                               <th>Amount</th>
                               <th>Due Date</th>
                               <th>Status</th>
-                              <th>Action</th>
+                              <th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -943,14 +1291,38 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td>
-                                  {inv.status !== "paid" && (
+                                  <div style={{display: 'flex', gap: '4px'}}>
                                     <button
-                                      onClick={() => markPaid(inv.id)}
+                                      onClick={() => editInvoice(inv)}
                                       className="btn-small"
                                     >
-                                      Mark Paid
+                                      Edit
                                     </button>
-                                  )}
+                                    {inv.status !== "paid" ? (
+                                      <button
+                                        onClick={() => markPaid(inv.id)}
+                                        className="btn-small"
+                                        style={{background: '#10b981'}}
+                                      >
+                                        Mark Paid
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => markUnpaid(inv.id)}
+                                        className="btn-small"
+                                        style={{background: '#f59e0b'}}
+                                      >
+                                        Mark Unpaid
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => deleteInvoice(inv.id)}
+                                      className="btn-small"
+                                      style={{background: '#ef4444'}}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
